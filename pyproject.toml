@@ -1,12 +1,60 @@
 [project]
 name = "fr_gtm"
 version = "0.1.0"
-description = "Add your description here"
+description = "Generic Transport Model for the FlyRuler simulation framework"
 readme = "README.md"
 authors = [{ name = "windlx", email = "1418043337@qq.com" }]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "fly-ruler-core",
+    "fly-ruler-std",
+    "numpy",
+    "pydantic>=2.13.4",
+    "rtoml>=0.13.0",
+]
+
+[tool.uv.sources]
+"fly-ruler-core" = { path = "../../packages/fly_ruler_core", editable = true }
+"fly-ruler-std" = { path = "../../packages/fly_ruler_std", editable = true }
+
+[dependency-groups]
+dev = ["mypy>=2.0.0", "pytest>=9.0.2", "ruff>=0.11.0"]
 
 [build-system]
 requires = ["uv_build>=0.11.11,<0.12.0"]
 build-backend = "uv_build"
+
+# --- Linting & Formatting (Ruff) ---
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "B",
+    "SIM"
+] # Style, Errors, Import sort, Bugbear, Simplification
+ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
+
+# --- Testing (Pytest) ---
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra -q"
+
+# --- Type Checking (MyPy) ---
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["src/fr_gtm", "tests", "examples"]
+
+[[tool.mypy.overrides]]
+module = ["casadi", "jax", "jax.*"]
+ignore_missing_imports = true

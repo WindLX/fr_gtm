@@ -1,0 +1,82 @@
+"""GTM wind subsystem composed from standard wind blocks."""
+
+import fly_ruler_core as fr
+from fly_ruler_std.blocks.wind import (
+    DrydenConfig,
+    DrydenTurbulence,
+    SteadyWind,
+    SteadyWindConfig,
+    WindShear,
+    WindShearConfig,
+)
+
+from ..config import GTMConfig
+
+
+@fr.block
+def WindParams() -> None:
+    """Runtime wind parameters shared by steady and turbulence blocks."""
+    wind_speed = fr.param("wind_speed", (1,), default=[0.0], unit="m/s")
+    wind_direction = fr.param("wind_direction", (1,), default=[0.0], unit="deg")
+    turbulence = fr.param("turbulence_level", (1,), default=[0.0])
+
+    fr.output("wind_speed_out", wind_speed, dim=(1,), unit="m/s")
+    fr.output("wind_direction_out", wind_direction, dim=(1,), unit="deg")
+    fr.output("turbulence_level_out", turbulence, dim=(1,))
+
+
+@fr.system
+def Wind(cfg: GTMConfig) -> None:
+    """Steady wind, wind shear, and Dryden turbulence subsystem."""
+    position = fr.input("position", (3,), unit="m")
+    velocity = fr.input("velocity", (3,), unit="m/s")
+    quat = fr.input("quat", (4,))
+    noise = fr.input("noise", (4,))
+
+    params = WindParams(name="params")
+    shear = WindShear(
+        WindShearConfig(runway_altitude=cfg.wind.runway_altitude, expose_params=False),
+        name="shear",
+    )
+    steady = SteadyWind(SteadyWindConfig(enable_wind_shear=True), name="steady")
+    dryden = DrydenTurbulence(
+        DrydenConfig(
+            wind_speed_low=cfg.wind.wind_speed_low,
+            scale_length_high=cfg.wind.scale_length_high,
+            wing_span=cfg.aircraft.b,
+            expose_wing_span=False,
+        ),
+        name="dryden",
+    )
+
+    altitude = fr.math.vector([-position[2]])
+    airspeed = fr.math.vector([fr.math.sqrt(fr.math.sum(velocity**2))])
+    turbulence_on = params.turbulence_level_out[0] > 1e-3
+    dryden_noise = fr.math.if_else(turbulence_on, noise, fr.math.vector([0.0] * 4))
+
+    altitude >> shear.altitude
+    quat >> steady.quat
+    params.wind_speed_out >> steady.wind_speed
+    params.wind_direction_out >> steady.wind_direction
+    shear.shear_factor >> steady.wind_shear_factor
+
+    dryden_noise >> dryden.noise
+    airspeed >> dryden.airspeed
+    altitude >> dryden.altitude
+    params.wind_direction_out >> dryden.wind_direction
+    params.turbulence_level_out >> dryden.turb_prob
+    quat >> dryden.quat
+
+    gust = fr.math.if_else(
+        turbulence_on, dryden.gust_vel_body, fr.math.vector([0.0] * 3)
+    )
+    omega = fr.math.if_else(
+        turbulence_on, dryden.gust_omega_body, fr.math.vector([0.0] * 3)
+    )
+
+    fr.export(
+        uvw=steady.steady_wind + gust,
+        omega=omega,
+        steady=steady.steady_wind,
+        gust=gust,
+    )
