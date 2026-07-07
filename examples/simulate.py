@@ -32,21 +32,21 @@ def main() -> None:
         }
     )
     p = model.p.build()
+    xd = model.xd.build()
     output_dir = Path("results") / "gtm_nominal"
     recorder = Recorder(model, output_dir)
     for step in range(100):
-        xs, ys, _ = model.discrete_fn(
+        x, xd, y, effects = model.discrete_fn(
             step * 0.01,
             x,
-            model.xd.build(),
+            xd,
             u,
             p,
-            n_steps=1,
         )
-        x = np.asarray(xs[0])
-        recorder.record(step=step, time=(step + 1) * 0.01, x=x, y=ys[0], u=u, p=p)
+        x = np.asarray(x)
+        recorder.record(step=step, time=(step + 1) * 0.01, x=x, y=y, u=u, p=p)
     recorder.save("nominal")
-    final = model.y.read(np.asarray(ys[0]))
+    final = model.y.read(np.asarray(y))
     print(f"saved: {output_dir / 'nominal.parquet'}")
     print(f"final altitude: {final['altitude'][0]:.3f} m")
     print(f"final airspeed: {final['V'][0]:.3f} m/s")

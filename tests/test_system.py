@@ -67,16 +67,12 @@ def test_short_integration_preserves_quaternion_norm() -> None:
             "Root::n": np.zeros(21),
         }
     )
-    xs, ys, _ = model.discrete_fn(
-        0.0,
-        x0,
-        model.xd.build(),
-        u,
-        model.p.build(),
-        n_steps=5,
-    )
-    final_state = model.x.read(np.asarray(xs[-1]))
-    assert len(ys) == 5
+    x = x0
+    xd = model.xd.build()
+    p = model.p.build()
+    for step in range(5):
+        x, xd, _y, _effects = model.discrete_fn(step * 0.01, x, xd, u, p)
+    final_state = model.x.read(np.asarray(x))
     np.testing.assert_allclose(
         np.linalg.norm(final_state["quat"]),
         1.0,

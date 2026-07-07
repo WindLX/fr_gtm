@@ -1,10 +1,13 @@
 """Compile GTM and inspect its compact topology and path-keyed layout."""
 
+from pathlib import Path
 from typing import Any
 
 import fly_ruler_core as fr
 
 from fr_gtm import GTMConfig, GTMSystem
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _semantic_blocks(schema: dict[str, Any]) -> list[str]:
@@ -30,15 +33,23 @@ def main() -> None:
     if not isinstance(builder, fr.PyIrBuilder):
         raise TypeError("GTMSystem must be instantiated as a top-level system")
 
-    fr.dump_system_to_file(builder, "gtm_system.json")
+    json_path = PROJECT_ROOT / "gtm_system.json"
+    fr.dump_system_to_file(builder, json_path)
 
     schema = fr.dump_system(builder)
     model = fr.Compiler(
         fr.CompilerSpec(
-            backend=fr.backends.numpy, integrator="rk4", dt=0.01, output_dir="./"
+            backend=fr.backends.numpy,
+            integrator="rk4",
+            dt=0.01,
+            output_dir=str(PROJECT_ROOT),
         )
     ).compile(builder)
 
+    print(f"topology json: {json_path}")
+    print(f"generated source: {model.source_path}")
+    print(f"layout markdown: {PROJECT_ROOT / 'generated_numpy_layout.md'}")
+    print()
     print("Blocks:")
     for path in _semantic_blocks(schema):
         print(f"  {path}")
