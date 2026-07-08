@@ -76,6 +76,34 @@ uv run python examples/trim_linearize.py
 uv run python examples/backend_compare.py
 ```
 
+Interactive stick control:
+
+```bash
+just setup-fly-stick
+just example-fly-stick -- --profile examples/fly_stick_profiles/t16000m.toml
+```
+
+The GTM model is heavy, so the stick example defaults to the native runtime:
+CasADi is used to generate a cached C++/pybind11 module, then the loop calls
+that compiled module at runtime. The first run may spend extra time compiling;
+later runs should reuse the cache. If the console still reports `rt < 1.0x` or
+lag warnings, lower `--hz` before trying higher-fidelity settings.
+
+For backend debugging, use `--backend numpy` or `--backend casadi`. For real-time
+MSFS streaming, keep the default `--backend native`.
+
+Dependency-free smoke test:
+
+```bash
+uv run python examples/fly_stick_gtm.py --dry-run --no-stick --no-proto --duration 0.05
+```
+
+Manual fixed-command test without a joystick:
+
+```bash
+just example-fly-stick -- --no-stick --no-proto --manual-command 10 0 0 40
+```
+
 ## Reference verification
 
 `tests/data/gtm_reference.npz` contains frozen results from the external
@@ -90,3 +118,55 @@ uv run --with /path/to/gtm_ad \
 ```
 
 Normal tests never depend on that external repository.
+
+### Backend trajectory regression
+
+`tests/data/gtm_backend_trajectory.npz` is a smaller frozen `gtm_ad` reference
+used specifically to guard backend regressions. The case is the manual
+`+elevator` scenario that previously exposed the CasADi/native matrix-layout
+bug:
+
+- initial altitude: `1000 m`
+- initial body speed: `100 m/s`
+- command: `[elevator, aileron, rudder, throttle] = [10, 0, 0, 40]`
+- integrator: `rk4`
+- step size: `dt = 1 / 120 s`
+- samples: `t = 0, 1, 2, 3 s`
+
+The expected physical trend is nose-down, descending, and accelerating. The
+test stores `gtm_ad` samples and one-step `x_next` values in the package, so
+regular test runs do not import the external `gtm_ad` checkout.
+
+Run the normal backend test set:
+
+```bash
+uv run pytest tests/test_backends.py -q
+```
+
+This checks NumPy, CasADi, and native. JAX is optional; if it is not installed,
+the JAX cases are skipped. To run the same test with a temporary JAX install:
+
+```bash
+JAX_ENABLE_X64=1 uv run --with jax --with jaxlib \
+  pytest tests/test_backends.py -q -k jax
+```
+
+`JAX_ENABLE_X64=1` is intentional. Without it, JAX defaults to float32 and the
+comparison becomes a precision test rather than a dynamics/backend parity test.
+
+The test uses two layers of tolerances:
+
+- backend-to-NumPy: strict (`1e-9` for CasADi/native, slightly looser for JAX);
+- FlyRuler-to-frozen-`gtm_ad`: engineering tolerance, because FlyRuler uses its
+  own SO3/RKMK integration and current GTM block decomposition while preserving
+  the same model trend and numerical behavior.
+
+Regenerate the backend trajectory reference from a local `gtm_ad` checkout with:
+
+```bash
+GTM_AD_PATH=/path/to/gtm_ad \
+  uv run python tests/generate_gtm_backend_reference.py
+```
+
+If `GTM_AD_PATH` is omitted, the script looks for the sibling project path used
+in this workspace: `/home/windlx/Work/Project/AircraftModels/GTM/gtm_ad`.

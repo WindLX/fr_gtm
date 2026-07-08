@@ -28,7 +28,7 @@ def WindParams() -> None:
 @fr.system
 def Wind(cfg: GTMConfig) -> None:
     """Steady wind, wind shear, and Dryden turbulence subsystem."""
-    position = fr.input("position", (3,), unit="m")
+    altitude = fr.input("altitude", (1,), unit="m")
     velocity = fr.input("velocity", (3,), unit="m/s")
     quat = fr.input("quat", (4,))
     noise = fr.input("noise", (4,))
@@ -49,7 +49,6 @@ def Wind(cfg: GTMConfig) -> None:
         name="dryden",
     )
 
-    altitude = fr.math.vector([-position[2]])
     airspeed = fr.math.vector([fr.math.sqrt(fr.math.sum(velocity**2))])
     turbulence_on = params.turbulence_level_out[0] > 1e-3
     dryden_noise = fr.math.if_else(turbulence_on, noise, fr.math.vector([0.0] * 4))

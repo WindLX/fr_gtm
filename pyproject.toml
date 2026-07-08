@@ -16,9 +16,12 @@ dependencies = [
 [tool.uv.sources]
 "fly-ruler-core" = { path = "../../packages/fly_ruler_core", editable = true }
 "fly-ruler-std" = { path = "../../packages/fly_ruler_std", editable = true }
+"fly-stick" = { path = "../../toolkit/fly_stick", editable = true }
+"fly_ruler_proto_python" = { path = "../../packages/fly_ruler_proto/bindings/python", editable = true }
 
 [dependency-groups]
 dev = ["mypy>=2.0.0", "pytest>=9.0.2", "ruff>=0.11.0"]
+fly-stick = ["fly-stick", "fly_ruler_proto_python"]
 
 [build-system]
 requires = ["uv_build>=0.11.11,<0.12.0"]
@@ -56,5 +59,5 @@ plugins = ["pydantic.mypy"]
 files = ["src/fr_gtm", "tests", "examples"]
 
 [[tool.mypy.overrides]]
-module = ["casadi", "jax", "jax.*"]
+module = ["casadi", "fly_ruler_proto_python", "fly_stick", "jax", "jax.*"]
 ignore_missing_imports = true

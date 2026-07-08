@@ -19,6 +19,12 @@ setup:
     uv sync
     echo "✓ Setup complete!"
 
+# 安装手柄控制示例的可选依赖
+setup-fly-stick:
+    echo "Synchronizing optional fly-stick dependencies..."
+    uv sync --group fly-stick
+    echo "✓ fly-stick example setup complete!"
+
 # ============================================================
 # 测试
 # ============================================================
@@ -86,6 +92,10 @@ example-trim:
 
 example-backends:
     uv run python examples/backend_compare.py
+
+# 使用 fly_stick 手柄控制 GTM，并可选发送 fly_ruler_proto 状态
+example-fly-stick *ARGS:
+    uv run --group fly-stick python examples/fly_stick_gtm.py {{ARGS}}
 
 # ============================================================
 # 清理

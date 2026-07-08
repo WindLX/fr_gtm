@@ -50,7 +50,8 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
     u >> actuator.command
     d >> wind.noise
 
-    eom.pos_ned_out >> wind.position
+    altitude_from_state = fr.math.vector([-eom.pos_ned_out[2]])
+    altitude_from_state >> wind.altitude
     eom.vel_body_out >> wind.velocity
     eom.quat_out >> wind.quat
 

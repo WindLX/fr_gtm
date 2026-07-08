@@ -1,12 +1,21 @@
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import casadi as ca
 import fly_ruler_core as fr
 import numpy as np
+import pytest
 from fly_ruler_core._core import PyCompiler
 from fly_ruler_core.codegen import JAXCodeGen
 
 from fr_gtm import GTMConfig, GTMSystem
+
+BACKEND_REFERENCE = np.load(
+    Path(__file__).parent / "data" / "gtm_backend_trajectory.npz",
+    allow_pickle=True,
+)
+TRAJECTORY_BACKENDS = ("numpy", "casadi", "native", "jax")
 
 
 def _builder() -> fr.PyIrBuilder:
@@ -20,6 +29,147 @@ def _as_numpy(value: Any) -> np.ndarray:
     if hasattr(value, "full"):
         return np.asarray(value.full(), dtype=float).reshape(-1)
     return np.asarray(value, dtype=float).reshape(-1)
+
+
+def _state(model: Any, x: np.ndarray) -> np.ndarray:
+    return _as_numpy(
+        model.x.build(
+            {
+                "Root.eom::pos_ned": x[0:3],
+                "Root.eom::vel_body": x[3:6],
+                "Root.eom::quat": x[6:10],
+                "Root.eom::omega_body": x[10:13],
+                "Root.actuator::position": x[13:17],
+                "Root.wind.dryden::u_gw": x[17:18],
+                "Root.wind.dryden::v_gw": x[18:20],
+                "Root.wind.dryden::w_gw": x[20:22],
+                "Root.wind.dryden::p_gw": x[22:23],
+                "Root.wind.dryden::q_gw": x[23:24],
+                "Root.wind.dryden::r_gw": x[24:25],
+            }
+        )
+    )
+
+
+def _parameters(model: Any, p: np.ndarray) -> np.ndarray:
+    # gtm_ad has 31 runtime parameters.  fr_gtm exposes the two Dryden
+    # configuration constants as additional parameters with package defaults.
+    return _as_numpy(
+        model.p.build(
+            {
+                "Root.wind.params::wind_speed": p[0:1],
+                "Root.wind.params::wind_direction": p[1:2],
+                "Root.wind.params::turbulence_level": p[2:3],
+                "Root.mass::weight_unc": p[3:4],
+                "Root.mass::inertia_unc": p[4:10],
+                "Root.aero::c_static_unc": p[10:16],
+                "Root.aero::c_e_unc": p[16:19],
+                "Root.aero::c_a_unc": p[19:25],
+                "Root.aero::c_r_unc": p[25:31],
+            }
+        )
+    )
+
+
+def _inputs(model: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    u = _as_numpy(
+        model.u.build(
+            {
+                "Root::u": BACKEND_REFERENCE["u"],
+                "Root::d": BACKEND_REFERENCE["d"],
+                "Root::n": BACKEND_REFERENCE["n"],
+            }
+        )
+    )
+    xd = _as_numpy(model.xd.build())
+    p = _parameters(model, BACKEND_REFERENCE["p"])
+    return xd, u, p
+
+
+@lru_cache(maxsize=None)
+def _compiled_backend(name: str) -> Any:
+    dt = float(BACKEND_REFERENCE["dt"])
+    if name == "jax":
+        jax = pytest.importorskip("jax")
+        jax.config.update("jax_enable_x64", True)
+        backend = fr.backends.jax
+        return fr.Compiler(
+            fr.CompilerSpec(backend=backend, integrator="rk4", dt=dt)
+        ).compile(_builder())
+    if name == "native":
+        try:
+            from fly_ruler_std.codegen import CodegenConfig, codegen
+        except ImportError as exc:
+            pytest.skip(f"native codegen dependencies are not available: {exc}")
+        casadi_model = fr.Compiler(
+            fr.CompilerSpec(backend=fr.backends.casadi, integrator="rk4", dt=dt)
+        ).compile(_builder())
+        return codegen(casadi_model, CodegenConfig(batch_size=1))
+
+    backend = {"numpy": fr.backends.numpy, "casadi": fr.backends.casadi}[name]
+    return fr.Compiler(
+        fr.CompilerSpec(backend=backend, integrator="rk4", dt=dt)
+    ).compile(_builder())
+
+
+@lru_cache(maxsize=None)
+def _casadi_functions(model_id: int, n_x: int, n_xd: int, n_u: int, n_p: int) -> Any:
+    del model_id
+    model = _compiled_backend("casadi")
+    t_sym = ca.SX.sym("t")
+    x_sym = ca.SX.sym("x", n_x)
+    xd_sym = ca.SX.sym("xd", n_xd)
+    u_sym = ca.SX.sym("u", n_u)
+    p_sym = ca.SX.sym("p", n_p)
+    x_next, xd_next, y_disc, effects = model.discrete_fn(
+        t_sym, x_sym, xd_sym, u_sym, p_sym
+    )
+    xdot, xd_cont, y_cont, effects_cont = model.continuous_fn(
+        t_sym, x_sym, xd_sym, u_sym, p_sym
+    )
+    return (
+        ca.Function(
+            "fr_gtm_casadi_discrete_reference_test",
+            [t_sym, x_sym, xd_sym, u_sym, p_sym],
+            [x_next, xd_next, y_disc, effects],
+        ),
+        ca.Function(
+            "fr_gtm_casadi_continuous_reference_test",
+            [t_sym, x_sym, xd_sym, u_sym, p_sym],
+            [xdot, xd_cont, y_cont, effects_cont],
+        ),
+    )
+
+
+@lru_cache(maxsize=None)
+def _evaluate_backend(
+    name: str,
+    sample_index: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    model = _compiled_backend(name)
+    dt = float(BACKEND_REFERENCE["dt"])
+    step = int(BACKEND_REFERENCE["sample_steps"][sample_index])
+    t = step * dt
+    x = _state(model, BACKEND_REFERENCE["x_samples"][sample_index])
+    xd, u, p = _inputs(model)
+
+    if name == "casadi":
+        discrete_fn, continuous_fn = _casadi_functions(
+            id(model),
+            model.module.n_x,
+            model.module.n_xd,
+            model.module.n_u,
+            model.module.n_p,
+        )
+        x_next, _, _, _ = discrete_fn(t, x, xd, u, p)
+        _, _, y, _ = continuous_fn(t, x, xd, u, p)
+        y_outputs = model.y.read(_as_numpy(y), by="path")
+        return _as_numpy(x_next), _as_numpy(y_outputs["Root::y"])
+
+    x_next, _, _, _ = model.discrete_fn(t, x, xd, u, p)
+    _, _, y, _ = model.continuous_fn(t, x, xd, u, p)
+    y_outputs = model.y.read(_as_numpy(y), by="path")
+    return _as_numpy(x_next), _as_numpy(y_outputs["Root::y"])
 
 
 def test_casadi_matches_numpy() -> None:
@@ -78,3 +228,57 @@ def test_jax_source_is_valid_python() -> None:
     plan = PyCompiler.compile_from_builder(_builder())
     source = JAXCodeGen().generate_source(plan, dt=0.01, integrator="euler")
     compile(source, "<fr_gtm_jax>", "exec")
+
+
+@pytest.mark.parametrize("backend", TRAJECTORY_BACKENDS)
+@pytest.mark.parametrize(
+    "sample_index",
+    range(len(BACKEND_REFERENCE["sample_steps"])),
+    ids=[f"t={step / 120.0:.0f}s" for step in BACKEND_REFERENCE["sample_steps"]],
+)
+def test_backend_one_step_matches_frozen_gtm_ad_trajectory(
+    backend: str,
+    sample_index: int,
+) -> None:
+    x_next, y = _evaluate_backend(backend, sample_index)
+    ref_x_rtol = 1e-6
+    ref_x_atol = 3e-4
+    ref_y_rtol = 1e-6
+    ref_y_atol = 1e-3
+    backend_rtol = 1e-9
+    backend_atol = 1e-9
+    if backend == "jax":
+        # JAX still agrees closely with x64 enabled, but its generated code
+        # can take a slightly different floating-point path from NumPy/CasADi.
+        backend_rtol = 1e-7
+        backend_atol = 1e-8
+
+    if backend != "numpy":
+        numpy_x_next, numpy_y = _evaluate_backend("numpy", sample_index)
+        np.testing.assert_allclose(
+            x_next,
+            numpy_x_next,
+            rtol=backend_rtol,
+            atol=backend_atol,
+        )
+        np.testing.assert_allclose(
+            y,
+            numpy_y,
+            rtol=backend_rtol,
+            atol=backend_atol,
+        )
+
+    model = _compiled_backend(backend)
+    expected_x_next = _state(model, BACKEND_REFERENCE["x_next_samples"][sample_index])
+    np.testing.assert_allclose(
+        x_next,
+        expected_x_next,
+        rtol=ref_x_rtol,
+        atol=ref_x_atol,
+    )
+    np.testing.assert_allclose(
+        y,
+        BACKEND_REFERENCE["y_samples"][sample_index],
+        rtol=ref_y_rtol,
+        atol=ref_y_atol,
+    )

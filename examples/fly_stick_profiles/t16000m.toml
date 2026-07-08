@@ -1,0 +1,80 @@
+device_name = "Thrustmaster T.16000M"
+author = "WindLX"
+created = "2026-07-08"
+description = "Default fr_gtm fly_stick profile for Thrustmaster T.16000M"
+
+[[axes]]
+code = 0
+alias = "ABS_X"
+
+[[axes]]
+code = 1
+alias = "ABS_Y"
+
+[[axes]]
+code = 5
+alias = "ABS_RZ"
+
+[[axes]]
+code = 6
+alias = "ABS_THROTTLE"
+
+[[buttons]]
+code = 288
+alias = "BTN_TRIGGER"
+
+[[buttons]]
+code = 289
+alias = "BTN_THUMB"
+
+[[buttons]]
+code = 290
+alias = "BTN_THUMB2"
+
+[[buttons]]
+code = 291
+alias = "BTN_TOP"
+
+[[buttons]]
+code = 292
+alias = "BTN_TOP2"
+
+[[buttons]]
+code = 293
+alias = "BTN_PINKIE"
+
+[[buttons]]
+code = 294
+alias = "BTN_BASE"
+
+[[buttons]]
+code = 295
+alias = "BTN_BASE2"
+
+[[buttons]]
+code = 296
+alias = "BTN_BASE3"
+
+[[buttons]]
+code = 297
+alias = "BTN_BASE4"
+
+[[buttons]]
+code = 298
+alias = "BTN_BASE5"
+
+[[buttons]]
+code = 299
+alias = "BTN_BASE6"
+
+[[buttons]]
+code = 303
+alias = "BTN_DEAD"
+
+[[hats]]
+code = 16
+alias = "ABS_HAT0X"
+
+[[hats]]
+code = 17
+alias = "ABS_HAT0Y"
