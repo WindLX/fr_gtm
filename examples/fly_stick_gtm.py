@@ -34,19 +34,12 @@ import numpy as np
 from fly_ruler_core import PyIrBuilder
 
 from fr_gtm import GTMConfig, GTMSystem
+from fr_gtm.stick_input import StickAxes, merge_active_sidestick_axes
 
 EARTH_RADIUS_M = 6_378_137.0
 DEFAULT_PROFILE = (
     Path(__file__).resolve().parent / "fly_stick_profiles" / "t16000m.toml"
 )
-
-
-@dataclass(frozen=True)
-class StickAxes:
-    roll: float = 0.0
-    pitch: float = 0.0
-    yaw: float = 0.0
-    throttle: float | None = None
 
 
 @dataclass(frozen=True)
@@ -349,7 +342,7 @@ def compile_model(
     ).compile(builder)
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(*, active_sidestick_default: bool = False) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--address", default="127.0.0.1:18002")
     parser.add_argument("--name", default="FlyRulerGTMStick")
@@ -367,6 +360,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--duration", type=float, default=0.0)
     parser.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
     parser.add_argument("--logical-name", default="stick")
+    parser.add_argument(
+        "--active-sidestick",
+        action=argparse.BooleanOptionalAction,
+        default=active_sidestick_default,
+        help="Use ActiveSidestick roll/pitch together with T16000 rudder/throttle.",
+    )
+    parser.add_argument("--active-bind-host", default="0.0.0.0")
+    parser.add_argument("--active-teensy-host", default="30.30.30.6")
+    parser.add_argument("--active-command-port", type=int, default=5405)
+    parser.add_argument("--active-logic-port", type=int, default=5406)
+    parser.add_argument("--active-state-port", type=int, default=5407)
+    parser.add_argument("--active-stale-after-ms", type=int, default=100)
+    parser.add_argument("--active-stick-index", type=int, choices=[1, 2], default=1)
+    parser.add_argument("--active-roll-limit-deg", type=float, default=20.0)
+    parser.add_argument("--active-pitch-limit-deg", type=float, default=15.0)
     parser.add_argument("--origin-lat", type=float, default=31.1434)
     parser.add_argument("--origin-lon", type=float, default=121.8052)
     parser.add_argument("--heartbeat", type=float, default=1.0)
@@ -418,6 +426,23 @@ async def _open_stick(args: argparse.Namespace) -> tuple[Any | None, Any | None]
     return pool, desc
 
 
+async def _open_active_sidestick(args: argparse.Namespace) -> Any | None:
+    if args.no_stick or not args.active_sidestick:
+        return None
+    fly_stick = _optional_import("fly_stick", "uv sync --group fly-stick")
+    config = fly_stick.ActiveSidestickConfig(
+        bind_host=args.active_bind_host,
+        teensy_host=args.active_teensy_host,
+        command_port=args.active_command_port,
+        logic_port=args.active_logic_port,
+        state_port=args.active_state_port,
+        stale_after_ms=args.active_stale_after_ms,
+    )
+    sidestick = fly_stick.ActiveSidestick(config)
+    await sidestick.start()
+    return sidestick
+
+
 def _latest_stick_state(pool: Any | None, logical_name: str) -> Any | None:
     if pool is None:
         return None
@@ -427,10 +452,12 @@ def _latest_stick_state(pool: Any | None, logical_name: str) -> Any | None:
         return None
 
 
-async def main_async() -> int:
-    args = parse_args()
+async def main_async(*, active_sidestick_default: bool = False) -> int:
+    args = parse_args(active_sidestick_default=active_sidestick_default)
     if args.hz <= 0:
         raise ValueError("--hz must be > 0")
+    if args.active_roll_limit_deg <= 0 or args.active_pitch_limit_deg <= 0:
+        raise ValueError("active sidestick angle limits must be > 0")
     if args.dry_run:
         args.no_stick = True
         args.no_proto = True
@@ -481,7 +508,11 @@ async def main_async() -> int:
         )
         print(f"connected: aircraft_uuid={client.aircraft_uuid}")
 
-    pool, desc = await _open_stick(args)
+    pool = None
+    desc = None
+    active_sidestick = None
+    active_roll_limit_rad = math.radians(args.active_roll_limit_deg)
+    active_pitch_limit_rad = math.radians(args.active_pitch_limit_deg)
     command_filter = CommandFilter(value=command.copy(), tau=args.command_filter_tau)
     running = True
 
@@ -496,6 +527,8 @@ async def main_async() -> int:
     next_tick = start
     step = 0
     try:
+        pool, desc = await _open_stick(args)
+        active_sidestick = await _open_active_sidestick(args)
         while running:
             elapsed = time.monotonic() - start
             if args.duration > 0 and elapsed >= args.duration:
@@ -503,6 +536,14 @@ async def main_async() -> int:
 
             state = _latest_stick_state(pool, args.logical_name)
             axes, buttons = _read_alias_input(state, desc)
+            if active_sidestick is not None:
+                axes = merge_active_sidestick_axes(
+                    axes,
+                    active_sidestick.fetch_nowait(),
+                    stick_index=args.active_stick_index,
+                    roll_limit_rad=active_roll_limit_rad,
+                    pitch_limit_rad=active_pitch_limit_rad,
+                )
             if args.manual_command is not None:
                 raw_command = np.asarray(
                     np.clip(
@@ -532,6 +573,19 @@ async def main_async() -> int:
             x = np.asarray(x, dtype=float)
             y = np.asarray(y, dtype=float)
             output = model.y.read(y)
+
+            if active_sidestick is not None:
+                actuator_position = np.asarray(
+                    output["actuator_position"], dtype=float
+                ).reshape(4)
+                alpha_deg = float(
+                    np.asarray(output["alpha"], dtype=float).reshape(-1)[0]
+                )
+                active_sidestick.send_aircraft_state(
+                    math.radians(alpha_deg),
+                    math.radians(float(actuator_position[0])),
+                    math.radians(float(actuator_position[1])),
+                )
 
             if client is not None and proto is not None:
                 wall_ts = time.time()
@@ -584,6 +638,8 @@ async def main_async() -> int:
                     )
                 next_tick = time.monotonic()
     finally:
+        if active_sidestick is not None:
+            await active_sidestick.stop()
         if pool is not None:
             await pool.stop()
         if client is not None:
@@ -593,8 +649,8 @@ async def main_async() -> int:
     return 0
 
 
-def main() -> int:
-    return asyncio.run(main_async())
+def main(*, active_sidestick_default: bool = False) -> int:
+    return asyncio.run(main_async(active_sidestick_default=active_sidestick_default))
 
 
 if __name__ == "__main__":

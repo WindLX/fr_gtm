@@ -16,7 +16,7 @@ dependencies = [
 [tool.uv.sources]
 "fly-ruler-core" = { path = "../../packages/fly_ruler_core", editable = true }
 "fly-ruler-std" = { path = "../../packages/fly_ruler_std", editable = true }
-"fly-stick" = { path = "../../toolkit/fly_stick", editable = true }
+"fly-stick" = { path = "../../packages/fly_stick", editable = true }
 "fly_ruler_proto_python" = { path = "../../packages/fly_ruler_proto/bindings/python", editable = true }
 
 [dependency-groups]

@@ -20,7 +20,7 @@ setup:
     echo "✓ Setup complete!"
 
 # 安装手柄控制示例的可选依赖
-setup-fly-stick:
+setup-stick:
     echo "Synchronizing optional fly-stick dependencies..."
     uv sync --group fly-stick
     echo "✓ fly-stick example setup complete!"
@@ -36,7 +36,7 @@ test:
     echo "✓ All tests passed!"
 
 # 运行特定测试文件
-test-single TEST:
+test-one TEST:
     uv run pytest {{TEST}} -v
 
 # ============================================================
@@ -50,18 +50,18 @@ fmt:
     echo "✓ Formatting complete!"
 
 # 代码检查 (Lint + 格式 + 类型)
-check: lint typecheck
+check: check-lint check-types
     echo "✓ All checks passed!"
 
 # Lint 检查
-lint:
+check-lint:
     echo "Checking Python code..."
-    uv run ruff check src/ tests/ examples/
-    uv run ruff format src/ tests/ examples/ --check
+    uv run ruff check src/ tests/ examples/ --exclude generate_gtm_backend_reference.py
+    uv run ruff format src/ tests/ examples/ --check --exclude generate_gtm_backend_reference.py
 
-typecheck:
+check-types:
     echo "Running type check..."
-    uv run mypy src/ tests/ examples/
+    uv run mypy src/ tests/ examples/ --exclude 'tests/generate_gtm_backend_reference\.py'
 
 build:
     echo "Building wheel and source distribution..."
@@ -96,6 +96,10 @@ example-backends:
 # 使用 fly_stick 手柄控制 GTM，并可选发送 fly_ruler_proto 状态
 example-fly-stick *ARGS:
     uv run --group fly-stick python examples/fly_stick_gtm.py {{ARGS}}
+
+# 使用主动侧杆控制升降舵/副翼，T16000 控制方向舵/油门
+example-active-sidestick *ARGS:
+    uv run --group fly-stick python -m examples.fly_active_sidestick_gtm {{ARGS}}
 
 # ============================================================
 # 清理

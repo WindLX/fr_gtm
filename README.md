@@ -79,9 +79,11 @@ uv run python examples/backend_compare.py
 Interactive stick control:
 
 ```bash
-just setup-fly-stick
+just setup-stick
 just example-fly-stick -- --profile examples/fly_stick_profiles/t16000m.toml
 ```
+
+ActiveSidestick controls elevator/aileron while the T16000 continues to control rudder/throttle: `just example-active-sidestick -- --profile examples/fly_stick_profiles/t16000m.toml`. Use `--active-stick-index 1|2`, `--active-roll-limit-deg`, and `--active-pitch-limit-deg` to select and calibrate the active stick; use `--invert-roll` or `--invert-pitch` if an axis direction is reversed.
 
 The GTM model is heavy, so the stick example defaults to the native runtime:
 CasADi is used to generate a cached C++/pybind11 module, then the loop calls
