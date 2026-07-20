@@ -56,11 +56,13 @@ def Wind(cfg: GTMConfig) -> None:
             scale_length_high=cfg.wind.scale_length_high,
             wing_span=cfg.aircraft.b,
             expose_wing_span=False,
+            minimum_airspeed=0.1,
+            minimum_scale_length=0.1,
         ),
         name="dryden",
     )
 
-    airspeed = fr.math.vector([fr.math.sqrt(fr.math.sum(velocity**2))])
+    airspeed = fr.math.vector([fr.math.smooth_norm(velocity, epsilon=1.0e-3)])
     turbulence_on = params.turbulence_level_out[0] > 1e-3
     dryden_noise = fr.math.if_else(turbulence_on, noise, fr.math.vector([0.0] * 4))
 

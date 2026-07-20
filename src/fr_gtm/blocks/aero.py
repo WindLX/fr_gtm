@@ -8,6 +8,7 @@ import fly_ruler_core as fr
 import numpy as np
 from fly_ruler_core import Signal
 from fly_ruler_std.libs.atmosphere import atmos76
+from fly_ruler_std.libs.coordinates import body_vel_to_aero_regularized
 from fly_ruler_std.libs.rotation import Quaternion
 
 from ..config import GTMConfig, Mode
@@ -204,9 +205,14 @@ def _control_coefficients(
     )
     right_aileron = aileron_table(alpha, beta, aileron)
 
-    rudder_sign = fr.math.sign(rudder)
-    rudder_delta = -rudder_sign * rudder_table(
-        alpha, -beta * rudder_sign, -fr.math.abs(rudder)
+    # Preserve the original left/right table convention while keeping a valid
+    # one-sided derivative at zero rudder.  The previous sign/abs expression
+    # multiplied the table by sign(0)=0, so CasADi/JAX incorrectly reported
+    # zero rudder control effectiveness at straight-flight trim.
+    rudder_delta = fr.math.where(
+        rudder >= 0.0,
+        -(rudder_table(alpha, -beta, -rudder) - rudder_table(alpha, -beta, 0.0)),
+        rudder_table(alpha, beta, rudder) - rudder_table(alpha, beta, 0.0),
     )
 
     return (
@@ -398,23 +404,20 @@ def Aero(cfg: GTMConfig) -> None:
     dcm_body_to_ned = Quaternion.to_dcm(quat)
     vel_ned = dcm_body_to_ned @ velocity
     altitude = -position[2]
-    ground_speed = fr.math.sqrt(vel_ned[0] ** 2 + vel_ned[1] ** 2 + 1e-8)
+    ground_speed = fr.math.smooth_norm(vel_ned[0:2], epsilon=1.0e-3)
     gamma = fr.math.degrees(fr.math.atan2(-vel_ned[2], ground_speed))
 
     air_velocity = velocity - wind_uvw
     air_omega = omega_body - wind_omega
-    tas = fr.math.sqrt(fr.math.sum(air_velocity**2) + 1e-8)
-    alpha = fr.math.degrees(fr.math.atan2(air_velocity[2], air_velocity[0]))
-    beta = fr.math.degrees(
-        fr.math.atan2(
-            air_velocity[1],
-            fr.math.sqrt(air_velocity[0] ** 2 + air_velocity[2] ** 2 + 1e-8),
-        )
+    tas, alpha_rad, beta_rad = body_vel_to_aero_regularized(
+        air_velocity, speed_epsilon=1.0e-3
     )
+    alpha = fr.math.degrees(alpha_rad)
+    beta = fr.math.degrees(beta_rad)
     atmosphere = atmos76(altitude)
     qbar = 0.5 * atmosphere.density * tas**2
     mach = tas / atmosphere.speed_of_sound
-    equivalent_airspeed = tas * fr.math.sqrt(atmosphere.density / 1.225 + 1e-8)
+    equivalent_airspeed = tas * atmosphere.sqrt_density_ratio
 
     aero = aerodynamic_loads(
         cfg,

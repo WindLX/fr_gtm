@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,7 @@ def _builder(*, enable_ground: bool = False) -> fr.PyIrBuilder:
 
 
 def _as_numpy(value: Any) -> np.ndarray:
-    if hasattr(value, "full"):
+    if isinstance(value, ca.DM):
         return np.asarray(value.full(), dtype=float).reshape(-1)
     return np.asarray(value, dtype=float).reshape(-1)
 
@@ -90,9 +91,10 @@ def _inputs(model: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 def _compiled_backend(name: str, *, enable_ground: bool = False) -> Any:
     dt = float(BACKEND_REFERENCE["dt"])
     if name == "jax":
-        jax = pytest.importorskip("jax")
-        jax.config.update("jax_enable_x64", True)
-        backend = fr.backends.jax
+        os.environ["JAX_PLATFORMS"] = "cpu"
+        os.environ["JAX_ENABLE_X64"] = "1"
+        pytest.importorskip("jax")
+        backend: fr.Backend[Any] = fr.backends.jax
         return fr.Compiler(
             fr.CompilerSpec(backend=backend, integrator="rk4", dt=dt)
         ).compile(_builder(enable_ground=enable_ground))
@@ -361,3 +363,60 @@ def test_backend_one_step_matches_frozen_gtm_ad_trajectory(
         rtol=ref_y_rtol,
         atol=ref_y_atol,
     )
+
+
+def test_zero_rudder_retains_local_control_effectiveness() -> None:
+    """The piecewise rudder table must have a usable derivative at trim."""
+
+    model = _compiled_backend("casadi")
+    x_sym = ca.SX.sym("x", model.n_x)
+    u_sym = ca.SX.sym("u", model.n_u)
+    _, _, y_sym, _ = model.continuous_fn(
+        ca.SX(0.0), x_sym, ca.SX.zeros(model.n_xd), u_sym, model.p.default()
+    )
+    actuator_row = next(
+        row for row in model.x.layout_rows() if row["path"] == "Root.actuator::position"
+    )
+    nz_row = next(row for row in model.y.layout_rows() if row["path"] == "Root::nz")
+    derivative = ca.jacobian(
+        y_sym[int(nz_row["start"])],
+        x_sym[int(actuator_row["start"]) + 2],
+    )
+    derivative_fn = ca.Function(
+        "zero_rudder_control_effectiveness", [x_sym, u_sym], [derivative]
+    )
+    x = _state(model, BACKEND_REFERENCE["x_samples"][0])
+    x[int(actuator_row["start"]) + 2] = 0.0
+    _, u, _ = _inputs(model)
+    value = float(derivative_fn(x, u))
+    assert np.isfinite(value)
+    assert abs(value) > 1.0e-10
+
+
+def test_zero_speed_airdata_jacobian_is_finite() -> None:
+    """Regularized fixed-wing air data must remain differentiable at rest."""
+
+    model = _compiled_backend("casadi")
+    x_sym = ca.SX.sym("zero_speed_x", model.n_x)
+    u_sym = ca.SX.sym("zero_speed_u", model.n_u)
+    xdot, _, y_sym, _ = model.continuous_fn(
+        ca.SX(0.0), x_sym, ca.SX.zeros(model.n_xd), u_sym, model.p.default()
+    )
+    selected_outputs = []
+    for path in ("Root::V", "Root::alpha", "Root::beta"):
+        row = next(item for item in model.y.layout_rows() if item["path"] == path)
+        selected_outputs.append(y_sym[int(row["start"]) : int(row["stop"])])
+    derivative = ca.Function(
+        "gtm_zero_speed_derivative",
+        [x_sym, u_sym],
+        [ca.jacobian(ca.vertcat(xdot, *selected_outputs), x_sym), y_sym],
+    )
+    x = _state(model, BACKEND_REFERENCE["x_samples"][0])
+    velocity = next(
+        row for row in model.x.layout_rows() if row["path"] == "Root.eom::vel_body"
+    )
+    x[int(velocity["start"]) : int(velocity["stop"])] = 0.0
+    _, u, _ = _inputs(model)
+    jacobian, outputs = derivative(x, u)
+    assert np.isfinite(np.asarray(jacobian)).all()
+    assert np.isfinite(np.asarray(outputs)).all()
