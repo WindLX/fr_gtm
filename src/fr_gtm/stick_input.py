@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Protocol
 
+STICK_VISUAL_MODEL_ID = "boeing_737_800"
+
 
 @dataclass(frozen=True)
 class StickAxes:

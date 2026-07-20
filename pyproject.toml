@@ -11,7 +11,12 @@ dependencies = [
     "numpy",
     "pydantic>=2.13.4",
     "rtoml>=0.13.0",
+    "typer>=0.25.1",
 ]
+
+[project.optional-dependencies]
+jax = ["jax[cuda12]>=0.8.2", "fly-ruler-core[all]"]
+all = ["fr-gtm[jax]"]
 
 [tool.uv.sources]
 "fly-ruler-core" = { path = "../../packages/fly_ruler_core", editable = true }
@@ -57,6 +62,7 @@ python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 files = ["src/fr_gtm", "tests", "examples"]
+exclude = ["tests/generate_gtm_backend_reference.py"]
 
 [[tool.mypy.overrides]]
 module = ["casadi", "fly_ruler_proto_python", "fly_stick", "jax", "jax.*"]

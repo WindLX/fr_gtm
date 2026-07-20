@@ -12,7 +12,7 @@ wind, uncertainty, and sensor behavior are numerically aligned with
   - Dryden filter state(8)
 - Root inputs: `u(4)`, `d(4)`, `n(21)`
 - Main outputs: `y(21)`, `clean_y(21)`
-- Tunable parameters: wind(5) and uncertainty(28)
+- Tunable parameters: wind(5) and uncertainty(28); `Root.wind.params::wind_direction` uses radians
 
 The system is assembled from explicit physical blocks:
 
@@ -56,6 +56,8 @@ print(model.y.read(y)["clean_y"])
 All state, input, output, and parameter overrides use complete paths such as
 `Root.eom::vel_body` and `Root.wind.params::wind_speed`.
 
+Wind direction is radians clockwise from NED North for both steady wind and low-altitude Dryden rotation. Older fr_gtm revisions passed a degree-valued parameter into the radian Dryden port; the corrected `wind_low` frozen case intentionally differs from that buggy behavior.
+
 ## Development
 
 ```bash
@@ -76,20 +78,24 @@ uv run python examples/trim_linearize.py
 uv run python examples/backend_compare.py
 ```
 
+The five offline examples keep their single-rate simulation flow explicit and use direct `for` loops where stepping is required. The T16000 and ActiveSidestick examples are multi-rate realtime systems, so they use std `run_async_realtime` tasks for input, dynamics, output/feedback, telemetry and recording.
+
 Interactive stick control:
 
 ```bash
 just setup-stick
-just example-fly-stick -- --profile examples/fly_stick_profiles/t16000m.toml
+just -- example-fly-stick --profile examples/fly_stick_profiles/t16000m.toml
 ```
 
-ActiveSidestick controls elevator/aileron while the T16000 continues to control rudder/throttle: `just example-active-sidestick -- --profile examples/fly_stick_profiles/t16000m.toml`. Use `--active-stick-index 1|2`, `--active-roll-limit-deg`, and `--active-pitch-limit-deg` to select and calibrate the active stick; use `--invert-roll` or `--invert-pitch` if an axis direction is reversed.
+ActiveSidestick controls elevator/aileron while the T16000 continues to control rudder/throttle: start `fly-ruler-server`, then run `just -- example-active-sidestick --profile examples/fly_stick_profiles/t16000m.toml --proto-address 127.0.0.1:18002`. This standalone demo uses std `run_async_realtime`, `make_discrete_model_task`, and `Recorder`; schema-first aircraft/controller/sensor/runtime telemetry is published through `fly_ruler_proto_python` and can be configured in the Proto Web before the loop begins. It does not import `fly_stick_gtm.py`. Use `--active-stick-index 1|2`, `--active-roll-limit-deg`, and `--active-pitch-limit-deg` to select and calibrate the active stick; use `--invert-roll` or `--invert-pitch` if an axis direction is reversed. Recorded data is saved under `results_active_sidestick/` unless `--no-save` is passed.
 
 The GTM model is heavy, so the stick example defaults to the native runtime:
 CasADi is used to generate a cached C++/pybind11 module, then the loop calls
 that compiled module at runtime. The first run may spend extra time compiling;
 later runs should reuse the cache. If the console still reports `rt < 1.0x` or
 lag warnings, lower `--hz` before trying higher-fidelity settings.
+
+The T16000 realtime path also uses std `run_async_realtime` and `Recorder`; use `--record-hz`, `--output-dir`, `--record-name`, or `--no-save` to configure recording.
 
 For backend debugging, use `--backend numpy` or `--backend casadi`. For real-time
 MSFS streaming, keep the default `--backend native`.
@@ -100,10 +106,25 @@ Dependency-free smoke test:
 uv run python examples/fly_stick_gtm.py --dry-run --no-stick --no-proto --duration 0.05
 ```
 
+The ActiveSidestick path has an equivalent hardware-free smoke mode after installing the `fly-stick` group:
+
+```bash
+uv run --group fly-stick python -m examples.fly_active_sidestick_gtm --dry-run --duration 0.05
+```
+
 Manual fixed-command test without a joystick:
 
 ```bash
-just example-fly-stick -- --no-stick --no-proto --manual-command 10 0 0 40
+just -- example-fly-stick --no-stick --no-proto --manual-command 10 0 0 40
+```
+
+## Ground operations
+
+`GTMConfig.default(enable_ground=True)` adds the shared std `GroundContact` subsystem with NASA GTM T2 nose/left-main/right-main locations. It contributes contact force to the EOM, accelerometer specific force and `nz`, and exports per-wheel penetration, normal, longitudinal and lateral loads. The default disabled model keeps the existing 25-state reference topology and parameter layout; enabling ground adds only `Root.ground.params::ground_down` and ground diagnostic outputs. `build_ground_initial_state()` supports both statically supported ground roll and an airborne touchdown initial state; `forward_speed_mps` is runway-horizontal NED North speed, while `sink_rate_mps` is positive NED Down speed.
+
+```bash
+just -- example-ground --scenario takeoff --backend numpy
+just -- example-ground --scenario touchdown --backend native
 ```
 
 ## Reference verification

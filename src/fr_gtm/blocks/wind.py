@@ -15,22 +15,33 @@ from ..config import GTMConfig
 
 @fr.block
 def WindParams() -> None:
-    """Runtime wind parameters shared by steady and turbulence blocks."""
+    """Runtime wind parameters shared by steady and turbulence blocks.
+
+    Direction is radians clockwise from NED North. SteadyWind and Dryden now
+    consume the same SI angular unit, so no model-specific conversion or
+    compatibility branch is required.
+    """
     wind_speed = fr.param("wind_speed", (1,), default=[0.0], unit="m/s")
-    wind_direction = fr.param("wind_direction", (1,), default=[0.0], unit="deg")
+    wind_direction = fr.param("wind_direction", (1,), default=[0.0], unit="rad")
     turbulence = fr.param("turbulence_level", (1,), default=[0.0])
 
     fr.output("wind_speed_out", wind_speed, dim=(1,), unit="m/s")
-    fr.output("wind_direction_out", wind_direction, dim=(1,), unit="deg")
+    fr.output("wind_direction_out", wind_direction, dim=(1,), unit="rad")
     fr.output("turbulence_level_out", turbulence, dim=(1,))
 
 
 @fr.system
 def Wind(cfg: GTMConfig) -> None:
-    """Steady wind, wind shear, and Dryden turbulence subsystem."""
+    """Compose shear-corrected steady wind and gated Dryden turbulence.
+
+    Body-velocity magnitude drives Dryden filter time constants. It deliberately
+    does not use wind-corrected TAS, which would create a block-level algebraic
+    loop through the aerodynamic model. A zero turbulence parameter gates both
+    excitation and outputs while retaining the standard Dryden state layout.
+    """
     altitude = fr.input("altitude", (1,), unit="m")
     velocity = fr.input("velocity", (3,), unit="m/s")
-    quat = fr.input("quat", (4,))
+    DCM = fr.input("DCM", (3, 3))
     noise = fr.input("noise", (4,))
 
     params = WindParams(name="params")
@@ -54,7 +65,7 @@ def Wind(cfg: GTMConfig) -> None:
     dryden_noise = fr.math.if_else(turbulence_on, noise, fr.math.vector([0.0] * 4))
 
     altitude >> shear.altitude
-    quat >> steady.quat
+    DCM >> steady.DCM
     params.wind_speed_out >> steady.wind_speed
     params.wind_direction_out >> steady.wind_direction
     shear.shear_factor >> steady.wind_shear_factor
@@ -64,7 +75,7 @@ def Wind(cfg: GTMConfig) -> None:
     altitude >> dryden.altitude
     params.wind_direction_out >> dryden.wind_direction
     params.turbulence_level_out >> dryden.turb_prob
-    quat >> dryden.quat
+    DCM >> dryden.DCM
 
     gust = fr.math.if_else(
         turbulence_on, dryden.gust_vel_body, fr.math.vector([0.0] * 3)

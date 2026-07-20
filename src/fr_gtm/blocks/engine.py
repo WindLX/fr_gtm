@@ -25,6 +25,8 @@ def _engine_loads(
     pressure_ratio: Signal,
     qbar: Signal,
 ) -> tuple[Signal, Signal]:
+    """Evaluate both engines in FRD axes using gtm_ad polynomial ordering."""
+
     engine = cfg.engine
     aircraft = cfg.aircraft
     left_direction = fr.math.vector(_engine_direction(aircraft.engl_ang).tolist())
@@ -36,6 +38,7 @@ def _engine_loads(
         (np.asarray(aircraft.engr_pos) - np.asarray(aircraft.cg_pos0)).tolist()
     )
 
+    # Coefficients are highest-order first, matching fr.math.polyval and gtm_ad.
     rpm_reference = fr.math.polyval(engine.throttle_coefficients, throttle)
     ram_drag = engine.ram_drag_coeff * qbar * aircraft.S
     thrust = (
@@ -89,6 +92,8 @@ def _engine_loads(
             momentum * (left_direction[2] + right_direction[2]),
         ]
     )
+    # Moments combine body-rate/shaft-momentum coupling with r x F from each
+    # engine's position relative to the center of mass.
     moment_raw = (
         fr.math.cross(omega_body, angular_momentum)
         + fr.math.cross(left_arm, left_thrust)
@@ -100,7 +105,12 @@ def _engine_loads(
 
 @fr.block
 def Engine(cfg: GTMConfig) -> None:
-    """Compute GTM twin-engine loads from throttle and air-data."""
+    """Compute twin-engine FRD loads from throttle, air-data and body rates.
+
+    Actuator channel 3 is throttle percent. Both engines currently share the
+    same reference-RPM/thrust polynomial but retain independent alignment and
+    position vectors for force direction and offset moments.
+    """
     actuators = fr.input("actuators", (4,), description="Actuator positions")
     omega_body = fr.input("omega_body", (3,), unit="rad/s")
     pressure_ratio = fr.input("pressure_ratio", (1,))

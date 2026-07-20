@@ -16,8 +16,12 @@ from typing import Any
 
 import numpy as np
 import rtoml
+from fly_ruler_std.blocks.physics import (
+    GroundContactConfig,
+    GroundContactPointConfig,
+)
 from fly_ruler_std.libs.units import Force, Inertia, Length, Pressure, Speed
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class Mode(str, Enum):
@@ -30,16 +34,20 @@ class Mode(str, Enum):
 
 
 class UncertaintyConfig(BaseModel):
-    """Nominal GTM parameters used by the uncertainty propagation block."""
+    """Nominal full/scale mass properties used by runtime perturbations.
 
-    w0: float = Force.lbf_to_n(185_000.0)  # Nominal aircraft weight (N).
-    Ixx0: float = Inertia.slug_ft2_to_kg_m2(1_770_000.0)  # Ixx (kg*m^2).
-    Iyy0: float = Inertia.slug_ft2_to_kg_m2(5_680_000.0)  # Iyy (kg*m^2).
-    Izz0: float = Inertia.slug_ft2_to_kg_m2(7_270_000.0)  # Izz (kg*m^2).
+    Products of inertia retain the source-model sign convention. The Mass block
+    converts this six-element representation into a symmetric FRD tensor.
+    """
+
+    w0: float = Field(default=Force.lbf_to_n(185_000.0), gt=0.0)  # Weight [N].
+    Ixx0: float = Field(default=Inertia.slug_ft2_to_kg_m2(1_770_000.0), gt=0.0)
+    Iyy0: float = Field(default=Inertia.slug_ft2_to_kg_m2(5_680_000.0), gt=0.0)
+    Izz0: float = Field(default=Inertia.slug_ft2_to_kg_m2(7_270_000.0), gt=0.0)
     Ixz0: float = Inertia.slug_ft2_to_kg_m2(160_000.0)  # Ixz (kg*m^2).
     Iyz0: float = 0.0  # Iyz (kg*m^2).
     Ixy0: float = 0.0  # Ixy (kg*m^2).
-    gravity_acc: float = 9.80665  # Standard gravity acceleration (m/s^2).
+    gravity_acc: float = Field(default=9.80665, gt=0.0)  # m/s^2
 
 
 class EngineConfig(BaseModel):
@@ -65,13 +73,43 @@ class EngineConfig(BaseModel):
     engr_ang: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0])
     cg_pos: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0])
 
+    @field_validator(
+        "engl_pos",
+        "engr_pos",
+        "engl_ang",
+        "engr_ang",
+        "cg_pos",
+    )
+    @classmethod
+    def validate_vector3(cls, value: list[float]) -> list[float]:
+        if len(value) != 3 or not np.all(np.isfinite(value)):
+            raise ValueError(
+                "engine position/alignment vectors must contain 3 finite values"
+            )
+        return value
+
+    @field_validator("thrust_coefficients", "throttle_coefficients")
+    @classmethod
+    def validate_polynomial(cls, value: list[float]) -> list[float]:
+        if len(value) != 4 or not np.all(np.isfinite(value)):
+            raise ValueError(
+                "engine polynomial coefficients must contain 4 finite values"
+            )
+        return value
+
 
 class SensorSingleConfig(BaseModel):
     """Bias, scale, and white-noise standard deviation for one sensor channel."""
 
     bias: float = 0.0
     scale: float = 1.0
-    noise_std: float = 0.0
+    noise_std: float = Field(default=0.0, ge=0.0)
+
+    @model_validator(mode="after")
+    def validate_finite(self) -> "SensorSingleConfig":
+        if not np.isfinite([self.bias, self.scale, self.noise_std]).all():
+            raise ValueError("sensor bias, scale and noise_std must be finite")
+        return self
 
 
 class SensorConfig(BaseModel):
@@ -130,7 +168,12 @@ class SensorConfig(BaseModel):
 
 
 class ReynoldsConfig(BaseModel):
-    """Lookup table for Reynolds number as a function of altitude and Mach."""
+    """Reynolds lookup with source altitude in feet and dimensionless Mach.
+
+    The stored MATLAB table is flattened in Fortran order by the aerodynamic
+    block before interpolation; changing that orientation changes all tables
+    that use Reynolds as an axis.
+    """
 
     altitude_ft: Any = Field(default=None, exclude=True)  # Altitude breakpoints (ft).
     mach_bp: Any = Field(default=None, exclude=True)  # Mach breakpoints.
@@ -138,7 +181,11 @@ class ReynoldsConfig(BaseModel):
 
 
 class BasicAirframeConfig(BaseModel):
-    """Baseline C6 aerodynamic coefficient lookup tables."""
+    """Baseline force/moment coefficient tables.
+
+    C2 data returns ``[CX, CZ]`` over alpha/beta/Reynolds. C4 returns
+    ``[CY, Cl, Cm, Cn]`` over alpha/beta. Angles are source-table degrees.
+    """
 
     alpha_c2: Any = Field(default=None, exclude=True)  # C2 alpha breakpoints (deg).
     beta_c2: Any = Field(default=None, exclude=True)  # C2 beta breakpoints (deg).
@@ -150,7 +197,11 @@ class BasicAirframeConfig(BaseModel):
 
 
 class ControlSurfacesConfig(BaseModel):
-    """Control-surface aerodynamic lookup tables and geometry constants."""
+    """Elevator/aileron/rudder increments and spanwise moment arms.
+
+    Each table retains gtm_ad axis order and degree-valued actuator breakpoints.
+    The four arm values shift local surface forces into roll/yaw moments.
+    """
 
     alpha_ele: Any = Field(default=None, exclude=True)
     beta_ele: Any = Field(default=None, exclude=True)
@@ -173,7 +224,11 @@ class ControlSurfacesConfig(BaseModel):
 
 
 class DynamicDerivativesConfig(BaseModel):
-    """Dynamic derivative lookup tables and reference geometry."""
+    """Kalviste rate-decomposition tables and reference lengths.
+
+    Normalized ``p/q/r`` contributions use wing span ``b`` or mean chord
+    ``Cbar``. The w-axis table carries coupled alpha/beta/rate coefficients.
+    """
 
     b: float = 6.0  # Wing span (m).
     Cbar: float = 1.0  # Mean aerodynamic chord (m).
@@ -193,7 +248,7 @@ class DynamicDerivativesConfig(BaseModel):
 
 
 class AeroForceMomentConfig(BaseModel):
-    """Reference geometry for aerodynamic force and moment computation."""
+    """Reference area/lengths and aerodynamic-center offset in SI units."""
 
     Sref: float = 1.0  # Reference wing area (m^2).
     b: float = 1.0  # Wing span (m).
@@ -244,14 +299,46 @@ class AircraftConfig(BaseModel):
         default_factory=lambda: [0.0, 1.95, -1.18]
     )  # Right engine [roll, pitch, yaw] alignment (deg).
 
+    @model_validator(mode="after")
+    def validate_geometry_and_inertia(self) -> "AircraftConfig":
+        if self.w0 <= 0.0 or self.S <= 0.0 or self.Cbar <= 0.0 or self.b <= 0.0:
+            raise ValueError("aircraft weight and reference geometry must be positive")
+        inertia = np.asarray(self.inertia0, dtype=float)
+        if inertia.shape != (6,) or not np.all(np.isfinite(inertia)):
+            raise ValueError("inertia0 must contain 6 finite values")
+        tensor = np.array(
+            [
+                [inertia[0], -inertia[5], -inertia[3]],
+                [-inertia[5], inertia[1], -inertia[4]],
+                [-inertia[3], -inertia[4], inertia[2]],
+            ]
+        )
+        if np.min(np.linalg.eigvalsh(tensor)) <= 0.0:
+            raise ValueError("inertia0 must define a positive-definite tensor")
+        for name, value in (
+            ("cg_pos0", self.cg_pos0),
+            ("ref_cg", self.ref_cg),
+            ("engl_pos", self.engl_pos),
+            ("engr_pos", self.engr_pos),
+            ("engl_ang", self.engl_ang),
+            ("engr_ang", self.engr_ang),
+        ):
+            if value and (len(value) != 3 or not np.all(np.isfinite(value))):
+                raise ValueError(f"{name} must contain 3 finite values")
+        return self
+
 
 class WindConfig(BaseModel):
-    """Wind and turbulence configuration shared by disturbance blocks."""
+    """Compile-time wind-shear and Dryden calibration values.
+
+    Mean wind speed, direction and turbulence level remain runtime parameters;
+    direction uses radians throughout the public model.
+    """
 
     runway_altitude: float = 0.0  # Runway altitude used by wind shear (m).
-    wind_speed_low: float = 15.0  # Low-altitude Dryden wind intensity at 6 m (m/s).
-    scale_length_high: float = 533.4  # High-altitude Dryden scale length (m).
-    noise_sample_time: float = 0.1  # Band-limited noise sample time (s).
+    wind_speed_low: float = Field(default=15.0, gt=0.0)  # Low-altitude intensity [m/s].
+    scale_length_high: float = Field(default=533.4, gt=0.0)  # High scale [m].
+    noise_sample_time: float = Field(default=0.1, gt=0.0)  # Noise sample time [s].
 
 
 class ActuatorConfig(BaseModel):
@@ -266,9 +353,32 @@ class ActuatorConfig(BaseModel):
         default_factory=lambda: [20.0, 20.0, 30.0, 100.0]
     )  # Upper position limits [deg, deg, deg, %].
 
+    @model_validator(mode="after")
+    def validate_channels(self) -> "ActuatorConfig":
+        vectors = [self.gain, self.rate_limit, self.position_lower, self.position_upper]
+        for value in vectors:
+            if value and (len(value) != 4 or not np.all(np.isfinite(value))):
+                raise ValueError("actuator vectors must contain 4 finite values")
+        if (
+            self.position_lower
+            and self.position_upper
+            and np.any(
+                np.asarray(self.position_lower) >= np.asarray(self.position_upper)
+            )
+        ):
+            raise ValueError("actuator lower limits must be below upper limits")
+        if self.rate_limit and np.any(np.asarray(self.rate_limit) <= 0.0):
+            raise ValueError("actuator rate limits must be positive")
+        return self
+
 
 class AeroConfig(BaseModel):
-    """Aerodynamic block configs loaded from GTM aerodynamic databases."""
+    """All GTM aerodynamic tables and force/moment geometry.
+
+    Arrays are loaded from the packaged ``aero_tables.npz`` resource and kept
+    out of Pydantic serialization so system JSON contains resource references,
+    not duplicated table payloads.
+    """
 
     # Optional aero_tables.npz path or containing directory.
     data_path: str | None = None
@@ -284,7 +394,12 @@ class AeroConfig(BaseModel):
 
 
 class GTMConfig(BaseModel):
-    """Top-level GTM configuration assembled from block-level configs."""
+    """Top-level configuration derived consistently for scale/mode choices.
+
+    Call :meth:`default` rather than independently constructing nested configs
+    when switching full-scale/scale model or flap/gear mode; geometry, engine,
+    actuators, sensors and aerodynamic resources are coupled by that choice.
+    """
 
     is_fullscale: bool = True
     mode: Mode = Mode.NORMAL
@@ -292,6 +407,9 @@ class GTMConfig(BaseModel):
         default_factory=lambda: _build_aircraft_config(True)
     )
     wind: WindConfig = Field(default_factory=WindConfig)
+    ground: GroundContactConfig = Field(
+        default_factory=lambda: _build_ground_config(True, _build_aircraft_config(True))
+    )
     uncertainty: UncertaintyConfig = Field(
         default_factory=lambda: _build_uncertainty_config(_build_aircraft_config(True))
     )
@@ -315,6 +433,7 @@ class GTMConfig(BaseModel):
         mode: Mode | str = Mode.NORMAL,
         *,
         data_path: str | Path | None = None,
+        enable_ground: bool = False,
     ) -> "GTMConfig":
         """Create the derived default GTM configuration.
 
@@ -322,6 +441,7 @@ class GTMConfig(BaseModel):
             is_fullscale: Use full-scale aircraft parameters when true.
             mode: Flap and landing-gear aerodynamic mode.
             data_path: Optional ``aero_tables.npz`` path or containing directory.
+            enable_ground: Instantiate the fixed-wing runway-contact subsystem.
         """
         mode_value = _parse_mode(mode)
         aircraft = _build_aircraft_config(is_fullscale)
@@ -330,6 +450,11 @@ class GTMConfig(BaseModel):
             mode=mode_value,
             aircraft=aircraft,
             wind=WindConfig(),
+            ground=_build_ground_config(
+                is_fullscale,
+                aircraft,
+                enabled=enable_ground,
+            ),
             uncertainty=_build_uncertainty_config(aircraft),
             engine=_build_engine_config(is_fullscale, aircraft),
             actuator=_build_actuator_config(is_fullscale),
@@ -375,6 +500,8 @@ class GTMConfig(BaseModel):
 
         if "wind" in raw:
             cfg.wind = _merge_model(cfg.wind, raw["wind"])
+        if "ground" in raw:
+            cfg.ground = _merge_model(cfg.ground, raw["ground"])
         if "uncertainty" in raw:
             cfg.uncertainty = _merge_model(cfg.uncertainty, raw["uncertainty"])
         if "engine" in raw:
@@ -462,6 +589,56 @@ def _build_uncertainty_config(aircraft: AircraftConfig) -> UncertaintyConfig:
         Iyz0=inertia[4],
         Ixy0=inertia[5],
     )
+
+
+def _build_ground_config(
+    is_fullscale: bool,
+    aircraft: AircraftConfig,
+    *,
+    enabled: bool = False,
+) -> GroundContactConfig:
+    """Derive FRD/SI wheel data from the public NASA GTM T2 parameters."""
+
+    length_ratio = _scale_factor(is_fullscale)
+    weight_ratio = aircraft.w0 / Force.lbf_to_n(57.75)
+    source_cg_ft = np.array(
+        [
+            -(4.5462 + 0.9153 * 0.2199),
+            -0.1416 / 12.0,
+            -0.9761,
+        ]
+    )
+    source_points_ft = np.array(
+        [
+            [-22.24 / 12.0, 0.0, -1.7 / 12.0],
+            [-61.31 / 12.0, -8.0 / 12.0, -2.64 / 12.0],
+            [-61.31 / 12.0, 7.8 / 12.0, -2.64 / 12.0],
+        ]
+    )
+    points_body = Length.ft_to_m((source_points_ft - source_cg_ft) * length_ratio)
+    force_per_length = Force.lbf_to_n(1.0) / Length.ft_to_m(1.0)
+    stiffness_ratio = weight_ratio / length_ratio
+    mass_ratio = weight_ratio
+    stiffness = np.array([25.0, 41.6, 42.4]) * 12.0 * force_per_length * stiffness_ratio
+    damping = np.full(3, 7.0) * force_per_length * np.sqrt(stiffness_ratio * mass_ratio)
+    support_matrix = np.vstack([np.ones(3), points_body[:, 0], points_body[:, 1]])
+    static_loads = np.linalg.solve(support_matrix, np.array([aircraft.w0, 0.0, 0.0]))
+    names = ("nose", "main_left", "main_right")
+    contacts = [
+        GroundContactPointConfig(
+            name=name,
+            point_body=point.tolist(),
+            normal_stiffness=float(wheel_stiffness),
+            normal_damping=float(wheel_damping),
+            rolling_resistance_coefficient=0.02,
+            lateral_friction_coefficient=0.5,
+            max_normal_force=float(10.0 * static_load),
+        )
+        for name, point, wheel_stiffness, wheel_damping, static_load in zip(
+            names, points_body, stiffness, damping, static_loads, strict=True
+        )
+    ]
+    return GroundContactConfig(enabled=enabled, contacts=contacts)
 
 
 def _build_engine_config(

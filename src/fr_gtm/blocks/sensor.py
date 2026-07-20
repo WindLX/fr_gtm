@@ -1,4 +1,4 @@
-"""GTM Sensor block — assembles the output vector and applies sensor errors."""
+"""GTM fixed-layout observation and externally driven sensor errors."""
 
 import fly_ruler_core as fr
 
@@ -10,7 +10,7 @@ _DEFAULT_CONFIG = SensorConfig()
 
 @fr.block
 def Sensor(cfg: SensorConfig = _DEFAULT_CONFIG) -> None:
-    """Assemble clean output vector and apply bias/scale/noise.
+    """Assemble clean output and apply configured bias, scale and noise.
 
     Inputs (individual signals):
         gamma(1,), alpha(1,), beta(1,), V(1,), altitude(1,),
@@ -19,7 +19,11 @@ def Sensor(cfg: SensorConfig = _DEFAULT_CONFIG) -> None:
 
     Outputs:
         clean_y(21,) — clean GTM output vector
-        measurement(21,) — noisy sensor measurement
+        measurement(21,) — ``bias + scale*clean_y + noise_std*noise``
+
+    ``noise`` contains standardized samples and is never generated internally.
+    Aerodynamic angles, Euler attitude and body rates are exported in degrees
+    to preserve the gtm_ad measurement layout; core dynamics remain SI/radian.
     """
     gamma = fr.input("gamma", (1,), unit="deg", description="Flight path angle")
     alpha = fr.input("alpha", (1,), unit="deg", description="Angle of attack")
@@ -34,7 +38,7 @@ def Sensor(cfg: SensorConfig = _DEFAULT_CONFIG) -> None:
     act_cmd = fr.input("act_cmd", (4,), description="Actuator commands")
     noise = fr.input("noise", (YDIM,), description="Sensor noise vector")
 
-    # Convert euler from rad→deg and omega from rad/s→deg/s
+    # Convert only at the measurement boundary. Physics stays in radians.
     euler_deg = fr.math.degrees(euler)
     omega_deg = fr.math.degrees(omega_body)
 
@@ -56,7 +60,8 @@ def Sensor(cfg: SensorConfig = _DEFAULT_CONFIG) -> None:
         ]
     )
 
-    # Extract bias, scale, noise_std from config
+    # The final five command/actual-throttle channels have no modeled sensor
+    # error in the reference implementation and therefore use identity/zero.
     bias_vec = fr.math.vector(
         [
             cfg.gamma.bias,

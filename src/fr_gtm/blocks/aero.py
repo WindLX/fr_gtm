@@ -14,7 +14,7 @@ from ..config import GTMConfig, Mode
 
 
 class AeroResult(NamedTuple):
-    """Aerodynamic coefficients, forces, and moments."""
+    """Coefficient order ``[CX,CY,CZ,Cl,Cm,Cn]`` and resulting FRD loads."""
 
     coefficients: Signal
     force: Signal
@@ -345,7 +345,12 @@ def aerodynamic_loads(
     c_a_unc: Signal,
     c_r_unc: Signal,
 ) -> AeroResult:
-    """Build the aerodynamic coefficient and load expressions."""
+    """Combine static, control and dynamic coefficients into FRD loads.
+
+    Force coefficients occupy the first three channels; moment coefficients
+    use reference lengths ``[b, Cbar, b]``. The final ``arm x force`` shifts
+    loads from the aerodynamic reference point to the configured center of mass.
+    """
     c_static, c_e, c_a, c_r = _uncertainty_scales(
         c_static_unc, c_e_unc, c_a_unc, c_r_unc
     )
@@ -369,7 +374,12 @@ def aerodynamic_loads(
 
 @fr.block
 def Aero(cfg: GTMConfig) -> None:
-    """Compute GTM air-data and aerodynamic force/moment."""
+    """Compute wind-relative air-data and GTM aerodynamic force/moment.
+
+    Position/velocity use NED/FRD SI conventions. GTM aerodynamic lookup axes
+    retain degrees, so alpha/beta are converted at this block boundary. Gust
+    angular velocity is subtracted before dynamic-derivative decomposition.
+    """
     actuators = fr.input("actuators", (4,), description="Actuator positions")
     position = fr.input("position", (3,), unit="m")
     velocity = fr.input("velocity", (3,), unit="m/s")
@@ -378,6 +388,8 @@ def Aero(cfg: GTMConfig) -> None:
     wind_uvw = fr.input("wind_uvw", (3,), unit="m/s")
     wind_omega = fr.input("wind_omega", (3,), unit="rad/s")
 
+    # Runtime coefficient perturbations preserve the 31-parameter gtm_ad order:
+    # static(6), elevator(3), aileron(6), rudder(6), after wind/mass parameters.
     c_static_unc = fr.param("c_static_unc", (6,), default=[0.0] * 6)
     c_e_unc = fr.param("c_e_unc", (3,), default=[0.0] * 3)
     c_a_unc = fr.param("c_a_unc", (6,), default=[0.0] * 6)

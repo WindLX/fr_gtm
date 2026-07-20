@@ -12,29 +12,36 @@ For a dependency-free smoke test:
 
 The default runtime backend is native: the model is first compiled with the
 CasADi backend, then lowered to a cached C++/pybind11 extension via
-fly_ruler_std.codegen.  The first run may spend some time compiling; later runs
+fly_ruler_core.codegen.  The first run may spend some time compiling; later runs
 reuse the cache.
 """
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import importlib
 import math
 import signal
-import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from types import FrameType
+from typing import Annotated, Any
 
 import fly_ruler_core as fr
 import numpy as np
+import typer
 from fly_ruler_core import PyIrBuilder
+from fly_ruler_std.runtime import (
+    LoopTask,
+    Recorder,
+    SimulationContext,
+    make_discrete_model_task,
+    run_async_realtime,
+)
 
-from fr_gtm import GTMConfig, GTMSystem
-from fr_gtm.stick_input import StickAxes, merge_active_sidestick_axes
+from fr_gtm import GTMConfig, GTMSystem, airdata_angles_to_proto_radians
+from fr_gtm.stick_input import STICK_VISUAL_MODEL_ID, StickAxes
 
 EARTH_RADIUS_M = 6_378_137.0
 DEFAULT_PROFILE = (
@@ -45,22 +52,6 @@ DEFAULT_PROFILE = (
 @dataclass(frozen=True)
 class StickButtons:
     trigger: bool = False
-
-
-@dataclass
-class CommandFilter:
-    """Small real-time command filter for noisy joystick axes."""
-
-    value: np.ndarray
-    tau: float
-
-    def update(self, target: np.ndarray, dt: float) -> np.ndarray:
-        if self.tau <= 0.0:
-            self.value = np.asarray(target, dtype=float)
-            return self.value
-        alpha = 1.0 - math.exp(-max(dt, 0.0) / self.tau)
-        self.value = self.value + alpha * (np.asarray(target, dtype=float) - self.value)
-        return self.value
 
 
 def _optional_import(module: str, install_hint: str) -> Any:
@@ -88,17 +79,6 @@ def _deadband(value: float, threshold: float) -> float:
     return math.copysign((magnitude - threshold) / (1.0 - threshold), value)
 
 
-def _throttle_percent(value: float | None, *, invert: bool) -> float | None:
-    if value is None:
-        return None
-    axis = value if invert else -value
-    return float(np.clip((axis + 1.0) * 50.0, 0.0, 100.0))
-
-
-def _symmetric_limit(lower: float, upper: float) -> float:
-    return min(abs(float(lower)), abs(float(upper)))
-
-
 def map_stick_to_command(
     axes: StickAxes,
     cfg: GTMConfig,
@@ -121,13 +101,14 @@ def map_stick_to_command(
     pitch = _deadband(axes.pitch if invert_pitch else -axes.pitch, axis_deadband)
     yaw = _deadband(axes.yaw if invert_rudder else -axes.yaw, axis_deadband)
 
-    elevator_limit = _symmetric_limit(lower[0], upper[0])
-    aileron_limit = _symmetric_limit(lower[1], upper[1])
-    rudder_limit = _symmetric_limit(lower[2], upper[2])
+    elevator_limit = min(abs(float(lower[0])), abs(float(upper[0])))
+    aileron_limit = min(abs(float(lower[1])), abs(float(upper[1])))
+    rudder_limit = min(abs(float(lower[2])), abs(float(upper[2])))
 
-    throttle = _throttle_percent(axes.throttle, invert=invert_throttle)
-    if throttle is None:
-        throttle = nominal_throttle
+    throttle = nominal_throttle
+    if axes.throttle is not None:
+        throttle_axis = axes.throttle if invert_throttle else -axes.throttle
+        throttle = float(np.clip((throttle_axis + 1.0) * 50.0, 0.0, 100.0))
 
     command = np.array(
         [
@@ -242,18 +223,20 @@ def build_proto_state(
 ) -> Any:
     """Convert GTM outputs into a fly_ruler_proto aircraft state."""
 
-    pos_ned = np.asarray(output["pos_ned"], dtype=float).reshape(3)
-    vel_body = np.asarray(output["vel_body"], dtype=float).reshape(3)
-    vel_ned = np.asarray(output["vel_ned"], dtype=float).reshape(3)
-    quat = np.asarray(output["quat"], dtype=float).reshape(4)
-    omega = np.asarray(output["omega_body"], dtype=float).reshape(3)
-    control = np.asarray(output["actuator_position"], dtype=float).reshape(4)
-    alpha = float(np.asarray(output["alpha"], dtype=float).reshape(-1)[0])
-    beta = float(np.asarray(output["beta"], dtype=float).reshape(-1)[0])
-    tas = float(np.asarray(output["V"], dtype=float).reshape(-1)[0])
-    eas = float(np.asarray(output["VE"], dtype=float).reshape(-1)[0])
-    mach = float(np.asarray(output["mach"], dtype=float).reshape(-1)[0])
-    qbar_pa = float(np.asarray(output["qbar"], dtype=float).reshape(-1)[0])
+    pos_ned = np.asarray(output["Root::pos_ned"], dtype=float).reshape(3)
+    vel_body = np.asarray(output["Root::vel_body"], dtype=float).reshape(3)
+    vel_ned = np.asarray(output["Root::vel_ned"], dtype=float).reshape(3)
+    quat = np.asarray(output["Root::quat"], dtype=float).reshape(4)
+    omega = np.asarray(output["Root::omega_body"], dtype=float).reshape(3)
+    control = np.asarray(output["Root::actuator_position"], dtype=float).reshape(4)
+    alpha, beta = airdata_angles_to_proto_radians(
+        alpha_deg=float(np.asarray(output["Root::alpha"], dtype=float).reshape(-1)[0]),
+        beta_deg=float(np.asarray(output["Root::beta"], dtype=float).reshape(-1)[0]),
+    )
+    tas = float(np.asarray(output["Root::V"], dtype=float).reshape(-1)[0])
+    eas = float(np.asarray(output["Root::VE"], dtype=float).reshape(-1)[0])
+    mach = float(np.asarray(output["Root::mach"], dtype=float).reshape(-1)[0])
+    qbar_pa = float(np.asarray(output["Root::qbar"], dtype=float).reshape(-1)[0])
 
     lat, lon, altitude = _ned_to_geodetic(
         pos_ned, origin_lat_deg=origin_lat_deg, origin_lon_deg=origin_lon_deg
@@ -270,19 +253,10 @@ def build_proto_state(
         flaps_right_ratio=0.0,
         spoilers_ratio=0.0,
     )
-    custom_fields = {
-        "flyruler.gtm.control.elevator_deg": float(control[0]),
-        "flyruler.gtm.control.aileron_deg": float(control[1]),
-        "flyruler.gtm.control.rudder_deg": float(control[2]),
-        "flyruler.gtm.airdata.mach": mach,
-        "flyruler.gtm.airdata.qbar_pa": qbar_pa,
-        "flyruler.gtm.navigation.altitude_m": altitude,
-        "flyruler.gtm.navigation.down_m": float(pos_ned[2]),
-    }
     return proto.create_aircraft_state(
         position=tuple(float(v) for v in pos_ned),
         velocity=tuple(float(v) for v in vel_body),
-        attitude=tuple(float(v) for v in quat),
+        attitude=proto.Attitude.from_quaternion(tuple(float(v) for v in quat)),
         angular_velocity=tuple(float(v) for v in omega),
         derived=proto.DerivedState(
             lat=lat,
@@ -295,13 +269,23 @@ def build_proto_state(
             gamma=gamma,
             chi=chi,
             mach=mach,
+            dynamic_pressure=qbar_pa,
         ),
         control_surfaces=controls,
-        engines=[
-            proto.EngineState(1, throttle_lever_ratio=throttle_ratio),
-            proto.EngineState(2, throttle_lever_ratio=throttle_ratio),
+        propulsors=[
+            proto.PropulsorState(
+                "engine.left",
+                kind=proto.PropulsorKind.JET,
+                throttle_ratio=throttle_ratio,
+                index=1,
+            ),
+            proto.PropulsorState(
+                "engine.right",
+                kind=proto.PropulsorKind.JET,
+                throttle_ratio=throttle_ratio,
+                index=2,
+            ),
         ],
-        custom_fields=custom_fields,
     )
 
 
@@ -316,7 +300,7 @@ def compile_model(
         raise TypeError("expected top-level GTM builder")
 
     if backend == "native":
-        from fly_ruler_std.codegen import CodegenConfig, codegen
+        from fly_ruler_core.codegen import NativeCodegenSpec, codegen
 
         print(
             "compiling GTM with CasADi for native codegen "
@@ -326,9 +310,13 @@ def compile_model(
             fr.CompilerSpec(backend=fr.backends.casadi, integrator=integrator, dt=dt)
         ).compile(builder)
         started = time.monotonic()
-        native = codegen(compiled, CodegenConfig(batch_size=1))
+        native = codegen(compiled, NativeCodegenSpec(batch_size=1))
         elapsed = time.monotonic() - started
-        cache_state = "cached" if native.build_info.get("cached") else "built"
+        cache_state = (
+            "cached"
+            if native.artifact is not None and native.artifact.cache_hit
+            else "built"
+        )
         print(f"native module ready: {cache_state} in {elapsed:.2f}s")
         return native
 
@@ -342,72 +330,39 @@ def compile_model(
     ).compile(builder)
 
 
-def parse_args(*, active_sidestick_default: bool = False) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--address", default="127.0.0.1:18002")
-    parser.add_argument("--name", default="FlyRulerGTMStick")
-    parser.add_argument("--hz", type=float, default=120.0)
-    parser.add_argument("--integrator", choices=["euler", "rk4"], default="rk4")
-    parser.add_argument(
-        "--backend",
-        choices=["native", "numpy", "casadi"],
-        default="native",
-        help=(
-            "Runtime backend. 'native' uses CasADi codegen + cached C++ and is "
-            "intended for real-time MSFS streaming."
-        ),
-    )
-    parser.add_argument("--duration", type=float, default=0.0)
-    parser.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
-    parser.add_argument("--logical-name", default="stick")
-    parser.add_argument(
-        "--active-sidestick",
-        action=argparse.BooleanOptionalAction,
-        default=active_sidestick_default,
-        help="Use ActiveSidestick roll/pitch together with T16000 rudder/throttle.",
-    )
-    parser.add_argument("--active-bind-host", default="0.0.0.0")
-    parser.add_argument("--active-teensy-host", default="30.30.30.6")
-    parser.add_argument("--active-command-port", type=int, default=5405)
-    parser.add_argument("--active-logic-port", type=int, default=5406)
-    parser.add_argument("--active-state-port", type=int, default=5407)
-    parser.add_argument("--active-stale-after-ms", type=int, default=100)
-    parser.add_argument("--active-stick-index", type=int, choices=[1, 2], default=1)
-    parser.add_argument("--active-roll-limit-deg", type=float, default=20.0)
-    parser.add_argument("--active-pitch-limit-deg", type=float, default=15.0)
-    parser.add_argument("--origin-lat", type=float, default=31.1434)
-    parser.add_argument("--origin-lon", type=float, default=121.8052)
-    parser.add_argument("--heartbeat", type=float, default=1.0)
-    parser.add_argument("--control-scale", type=float, default=0.6)
-    parser.add_argument("--axis-deadband", type=float, default=0.03)
-    parser.add_argument("--command-filter-tau", type=float, default=0.12)
-    parser.add_argument("--initial-altitude", type=float, default=1000.0)
-    parser.add_argument("--initial-speed", type=float, default=100.0)
-    parser.add_argument("--nominal-throttle", type=float, default=40.0)
-    parser.add_argument(
-        "--manual-command",
-        nargs=4,
-        type=float,
-        metavar=("ELEV", "AIL", "RUD", "THR"),
-        help=(
-            "Fixed [elevator, aileron, rudder, throttle] command; "
-            "useful with --no-stick."
-        ),
-    )
-    parser.add_argument("--invert-roll", action="store_true")
-    parser.add_argument("--invert-pitch", action="store_true")
-    parser.add_argument("--invert-rudder", action="store_true")
-    parser.add_argument("--invert-throttle", action="store_true")
-    parser.add_argument("--no-stick", action="store_true")
-    parser.add_argument("--no-proto", action="store_true")
-    parser.add_argument("--dry-run", action="store_true")
-    argv = sys.argv[1:]
-    if argv[:1] == ["--"]:
-        argv = argv[1:]
-    return parser.parse_args(argv)
+@dataclass
+class Options:
+    address: str
+    name: str
+    hz: float
+    record_hz: float
+    integrator: str
+    backend: str
+    duration: float
+    profile: Path
+    logical_name: str
+    origin_lat: float
+    origin_lon: float
+    heartbeat: float
+    control_scale: float
+    axis_deadband: float
+    initial_altitude: float
+    initial_speed: float
+    nominal_throttle: float
+    manual_command: tuple[float, float, float, float] | None
+    invert_roll: bool
+    invert_pitch: bool
+    invert_rudder: bool
+    invert_throttle: bool
+    output_dir: Path
+    record_name: str
+    no_save: bool
+    no_stick: bool
+    no_proto: bool
+    dry_run: bool
 
 
-async def _open_stick(args: argparse.Namespace) -> tuple[Any | None, Any | None]:
+async def _open_stick(args: Options) -> tuple[Any | None, Any | None]:
     if args.no_stick:
         return None, None
     fly_stick = _optional_import("fly_stick", "uv sync --group fly-stick")
@@ -426,41 +381,17 @@ async def _open_stick(args: argparse.Namespace) -> tuple[Any | None, Any | None]
     return pool, desc
 
 
-async def _open_active_sidestick(args: argparse.Namespace) -> Any | None:
-    if args.no_stick or not args.active_sidestick:
-        return None
-    fly_stick = _optional_import("fly_stick", "uv sync --group fly-stick")
-    config = fly_stick.ActiveSidestickConfig(
-        bind_host=args.active_bind_host,
-        teensy_host=args.active_teensy_host,
-        command_port=args.active_command_port,
-        logic_port=args.active_logic_port,
-        state_port=args.active_state_port,
-        stale_after_ms=args.active_stale_after_ms,
-    )
-    sidestick = fly_stick.ActiveSidestick(config)
-    await sidestick.start()
-    return sidestick
-
-
-def _latest_stick_state(pool: Any | None, logical_name: str) -> Any | None:
-    if pool is None:
-        return None
-    try:
-        return pool.fetch_nowait().get(logical_name)
-    except Exception:
-        return None
-
-
-async def main_async(*, active_sidestick_default: bool = False) -> int:
-    args = parse_args(active_sidestick_default=active_sidestick_default)
-    if args.hz <= 0:
-        raise ValueError("--hz must be > 0")
-    if args.active_roll_limit_deg <= 0 or args.active_pitch_limit_deg <= 0:
-        raise ValueError("active sidestick angle limits must be > 0")
+async def main_async(args: Options) -> int:
+    if args.hz <= 0 or args.record_hz <= 0:
+        raise ValueError("--hz and --record-hz must be > 0")
+    if args.backend not in {"native", "numpy", "casadi"}:
+        raise ValueError("--backend must be native, numpy, or casadi")
+    if args.integrator not in {"euler", "rk4"}:
+        raise ValueError("--integrator must be euler or rk4")
     if args.dry_run:
         args.no_stick = True
         args.no_proto = True
+        args.no_save = True
         if args.duration <= 0:
             args.duration = 0.05
 
@@ -487,7 +418,7 @@ async def main_async(*, active_sidestick_default: bool = False) -> int:
     p = model.p.default()
     u = build_input(model, command)
     _, _, y0, _ = model.continuous_fn(0.0, x, xd, u, p)
-    output = model.y.read(np.asarray(y0, dtype=float))
+    output = model.y.read(np.asarray(y0, dtype=float), by="path")
 
     proto = None
     client = None
@@ -503,143 +434,129 @@ async def main_async(*, active_sidestick_default: bool = False) -> int:
             args.address,
             args.name,
             initial_state=initial_state,
-            toml_config="[aircraft]\nmodel='fr_gtm'\nrole='stick_open_loop'",
+            toml_config=(
+                f"[aircraft]\nmodel='{STICK_VISUAL_MODEL_ID}'\nrole='stick_open_loop'"
+            ),
             heartbeat_interval_secs=args.heartbeat,
         )
         print(f"connected: aircraft_uuid={client.aircraft_uuid}")
 
+    recorder = Recorder(model, args.output_dir)
+    ctx = SimulationContext(dt=dt)
+    ctx.state.update(
+        {"x": x, "xd": xd, "u": u, "p": p, "y": y0, "effects": np.zeros(0)}
+    )
+    ctx.data.update({"command": command, "output": output, "buttons": StickButtons()})
     pool = None
     desc = None
-    active_sidestick = None
-    active_roll_limit_rad = math.radians(args.active_roll_limit_deg)
-    active_pitch_limit_rad = math.radians(args.active_pitch_limit_deg)
-    command_filter = CommandFilter(value=command.copy(), tau=args.command_filter_tau)
-    running = True
 
-    def stop(_signal: int, _frame: Any) -> None:
-        nonlocal running
-        running = False
+    def stop(signum: int, _frame: FrameType | None) -> None:
+        ctx.request_stop(f"signal {signum}")
 
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
 
-    start = time.monotonic()
-    next_tick = start
-    step = 0
+    wall_start = time.monotonic()
+
+    def input_task(task_ctx: SimulationContext) -> None:
+        state = None if pool is None else pool.fetch_nowait().get(args.logical_name)
+        axes, buttons = _read_alias_input(state, desc)
+        if args.manual_command is not None:
+            command = np.asarray(
+                np.clip(
+                    np.asarray(args.manual_command, dtype=float),
+                    np.asarray(cfg.actuator.position_lower, dtype=float),
+                    np.asarray(cfg.actuator.position_upper, dtype=float),
+                ),
+                dtype=float,
+            )
+        else:
+            command = map_stick_to_command(
+                axes,
+                cfg,
+                invert_roll=args.invert_roll,
+                invert_pitch=args.invert_pitch,
+                invert_rudder=args.invert_rudder,
+                invert_throttle=args.invert_throttle,
+                control_scale=args.control_scale,
+                nominal_throttle=args.nominal_throttle,
+                axis_deadband=args.axis_deadband,
+            )
+        task_ctx.data["buttons"] = buttons
+        task_ctx.data["command"] = command
+        task_ctx.state["u"] = build_input(model, command)
+
+    def output_task(task_ctx: SimulationContext) -> None:
+        output = model.y.read(np.asarray(task_ctx.state["y"], dtype=float), by="path")
+        task_ctx.data["output"] = output
+        buttons = task_ctx.data["buttons"]
+        if client is not None and proto is not None:
+            wall_ts = time.time()
+            client.update_state(
+                build_proto_state(
+                    proto,
+                    output,
+                    origin_lat_deg=args.origin_lat,
+                    origin_lon_deg=args.origin_lon,
+                ),
+                timestamp=wall_ts,
+            )
+            if buttons.trigger:
+                client.create_event("flyruler.gtm.trigger", timestamp=wall_ts)
+
+    def record_task(task_ctx: SimulationContext) -> None:
+        recorder.record(
+            task_ctx.step,
+            task_ctx.time,
+            x=np.asarray(task_ctx.state["x"], dtype=float),
+            xd=np.asarray(task_ctx.state["xd"], dtype=float),
+            y=np.asarray(task_ctx.state["y"], dtype=float),
+            u=np.asarray(task_ctx.state["u"], dtype=float),
+            effect=np.asarray(task_ctx.state["effects"], dtype=float),
+        )
+
+    def status_task(task_ctx: SimulationContext) -> None:
+        output = task_ctx.data["output"]
+        realtime_factor = task_ctx.time / max(time.monotonic() - wall_start, 1.0e-9)
+        pos_ned = np.asarray(output["Root::pos_ned"], dtype=float).reshape(3)
+        speed = float(np.asarray(output["Root::V"]).reshape(-1)[0])
+        print(
+            f"t={task_ctx.time:.1f}s rt={realtime_factor:.2f}x "
+            f"alt={-pos_ned[2]:.1f} V={speed:.1f} "
+            f"cmd={np.array2string(np.asarray(task_ctx.data['command']), precision=3)}"
+        )
+
+    tasks = [
+        LoopTask("input", input_task, args.hz, stage="input"),
+        make_discrete_model_task(
+            model, name="aircraft", rate_hz=args.hz, wait_for=("input",)
+        ),
+        LoopTask("output", output_task, args.hz, stage="io", wait_for=("aircraft",)),
+        LoopTask(
+            "record",
+            record_task,
+            args.record_hz,
+            stage="record",
+            wait_for=("aircraft",),
+        ),
+        LoopTask(
+            "status",
+            status_task,
+            1.0,
+            stage="record",
+            order=1,
+            wait_for=("output",),
+        ),
+    ]
+
     try:
         pool, desc = await _open_stick(args)
-        active_sidestick = await _open_active_sidestick(args)
-        while running:
-            elapsed = time.monotonic() - start
-            if args.duration > 0 and elapsed >= args.duration:
-                break
-
-            state = _latest_stick_state(pool, args.logical_name)
-            axes, buttons = _read_alias_input(state, desc)
-            if active_sidestick is not None:
-                axes = merge_active_sidestick_axes(
-                    axes,
-                    active_sidestick.fetch_nowait(),
-                    stick_index=args.active_stick_index,
-                    roll_limit_rad=active_roll_limit_rad,
-                    pitch_limit_rad=active_pitch_limit_rad,
-                )
-            if args.manual_command is not None:
-                raw_command = np.asarray(
-                    np.clip(
-                        np.asarray(args.manual_command, dtype=float),
-                        np.asarray(cfg.actuator.position_lower, dtype=float),
-                        np.asarray(cfg.actuator.position_upper, dtype=float),
-                    ),
-                    dtype=float,
-                )
-            else:
-                raw_command = map_stick_to_command(
-                    axes,
-                    cfg,
-                    invert_roll=args.invert_roll,
-                    invert_pitch=args.invert_pitch,
-                    invert_rudder=args.invert_rudder,
-                    invert_throttle=args.invert_throttle,
-                    control_scale=args.control_scale,
-                    nominal_throttle=args.nominal_throttle,
-                    axis_deadband=args.axis_deadband,
-                )
-            command = command_filter.update(raw_command, dt)
-            u = build_input(model, command)
-            step_started = time.monotonic()
-            x, xd, y, _effects = model.discrete_fn(step * dt, x, xd, u, p)
-            step_elapsed = time.monotonic() - step_started
-            x = np.asarray(x, dtype=float)
-            y = np.asarray(y, dtype=float)
-            output = model.y.read(y)
-
-            if active_sidestick is not None:
-                actuator_position = np.asarray(
-                    output["actuator_position"], dtype=float
-                ).reshape(4)
-                alpha_deg = float(
-                    np.asarray(output["alpha"], dtype=float).reshape(-1)[0]
-                )
-                active_sidestick.send_aircraft_state(
-                    math.radians(alpha_deg),
-                    math.radians(float(actuator_position[0])),
-                    math.radians(float(actuator_position[1])),
-                )
-
-            if client is not None and proto is not None:
-                wall_ts = time.time()
-                client.update_state(
-                    build_proto_state(
-                        proto,
-                        output,
-                        origin_lat_deg=args.origin_lat,
-                        origin_lon_deg=args.origin_lon,
-                    ),
-                    timestamp=wall_ts,
-                )
-                if buttons.trigger:
-                    client.create_event("flyruler.gtm.trigger", timestamp=wall_ts)
-
-            if step % max(int(args.hz), 1) == 0:
-                sim_time = (step + 1) * dt
-                realtime_factor = sim_time / max(time.monotonic() - start, 1.0e-9)
-                print(
-                    "t={:.2f}s sim={:.2f}s rt={:.2f}x step={:.3f}s "
-                    "pos_ned={} alt={:.1f} V={:.1f} att={} cmd={}".format(
-                        elapsed,
-                        sim_time,
-                        realtime_factor,
-                        step_elapsed,
-                        np.array2string(
-                            np.asarray(output["pos_ned"]).squeeze(), precision=3
-                        ),
-                        float(-np.asarray(output["pos_ned"]).reshape(3)[2]),
-                        float(np.asarray(output["V"]).reshape(-1)[0]),
-                        np.array2string(
-                            np.asarray(output["euler"]).squeeze(), precision=3
-                        ),
-                        np.array2string(command, precision=3),
-                    )
-                )
-
-            step += 1
-            next_tick += dt
-            sleep_s = next_tick - time.monotonic()
-            if sleep_s > 0:
-                await asyncio.sleep(sleep_s)
-            else:
-                if step % max(int(args.hz), 1) == 0:
-                    lag = -sleep_s
-                    print(
-                        "warning: simulation cannot keep real time; "
-                        f"lag={lag:.3f}s. Lower --hz, use --integrator euler, "
-                        "or switch to --backend native."
-                    )
-                next_tick = time.monotonic()
+        await run_async_realtime(
+            ctx, tasks, duration=None if args.duration <= 0 else args.duration
+        )
     finally:
-        if active_sidestick is not None:
-            await active_sidestick.stop()
+        if not args.no_save and recorder.samples:
+            recorder.save(args.record_name)
         if pool is not None:
             await pool.stop()
         if client is not None:
@@ -649,9 +566,72 @@ async def main_async(*, active_sidestick_default: bool = False) -> int:
     return 0
 
 
-def main(*, active_sidestick_default: bool = False) -> int:
-    return asyncio.run(main_async(active_sidestick_default=active_sidestick_default))
+def main(
+    address: str = "127.0.0.1:18002",
+    name: str = "Boeing 737-800 GTM Stick",
+    hz: float = 120.0,
+    record_hz: float = 60.0,
+    integrator: str = "rk4",
+    backend: str = "native",
+    duration: float = 0.0,
+    profile: Path = DEFAULT_PROFILE,
+    logical_name: str = "stick",
+    origin_lat: float = 31.1434,
+    origin_lon: float = 121.8052,
+    heartbeat: float = 1.0,
+    control_scale: float = 0.6,
+    axis_deadband: float = 0.03,
+    initial_altitude: float = 1000.0,
+    initial_speed: float = 100.0,
+    nominal_throttle: float = 40.0,
+    manual_command: tuple[float, float, float, float] | None = None,
+    invert_roll: Annotated[bool, typer.Option("--invert-roll")] = False,
+    invert_pitch: Annotated[bool, typer.Option("--invert-pitch")] = False,
+    invert_rudder: Annotated[bool, typer.Option("--invert-rudder")] = False,
+    invert_throttle: Annotated[bool, typer.Option("--invert-throttle")] = False,
+    output_dir: Path = Path("results/fly_stick"),
+    record_name: str = "fly_stick",
+    no_save: Annotated[bool, typer.Option("--no-save")] = False,
+    no_stick: Annotated[bool, typer.Option("--no-stick")] = False,
+    no_proto: Annotated[bool, typer.Option("--no-proto")] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+) -> int:
+    """Run the GTM realtime stick simulation."""
+    return asyncio.run(
+        main_async(
+            Options(
+                address=address,
+                name=name,
+                hz=hz,
+                record_hz=record_hz,
+                integrator=integrator,
+                backend=backend,
+                duration=duration,
+                profile=profile,
+                logical_name=logical_name,
+                origin_lat=origin_lat,
+                origin_lon=origin_lon,
+                heartbeat=heartbeat,
+                control_scale=control_scale,
+                axis_deadband=axis_deadband,
+                initial_altitude=initial_altitude,
+                initial_speed=initial_speed,
+                nominal_throttle=nominal_throttle,
+                manual_command=manual_command,
+                invert_roll=invert_roll,
+                invert_pitch=invert_pitch,
+                invert_rudder=invert_rudder,
+                invert_throttle=invert_throttle,
+                output_dir=output_dir,
+                record_name=record_name,
+                no_save=no_save,
+                no_stick=no_stick,
+                no_proto=no_proto,
+                dry_run=dry_run,
+            )
+        )
+    )
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    typer.run(main)

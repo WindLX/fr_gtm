@@ -9,9 +9,21 @@ _GRAVITY = 9.80665
 
 @fr.block
 def Mass(cfg: GTMConfig) -> None:
-    """Apply GTM mass and inertia uncertainty parameters."""
-    weight_unc = fr.param("weight_unc", (1,), default=[0.0])
-    inertia_unc = fr.param("inertia_unc", (6,), default=[0.0] * 6)
+    """Apply relative uncertainty to weight and the six inertia products.
+
+    ``inertia_unc`` follows ``[Ixx, Iyy, Izz, Ixz, Iyz, Ixy]`` from gtm_ad.
+    Products enter the FRD tensor with the source convention's negative
+    off-diagonal signs. Zero perturbation reproduces nominal reference data.
+    """
+    weight_unc = fr.param(
+        "weight_unc", (1,), default=[0.0], description="Relative weight uncertainty"
+    )
+    inertia_unc = fr.param(
+        "inertia_unc",
+        (6,),
+        default=[0.0] * 6,
+        description="Relative inertia uncertainty [Ixx, Iyy, Izz, Ixz, Iyz, Ixy]",
+    )
 
     nominal = cfg.aircraft.inertia0
     weight = cfg.aircraft.w0 * (1.0 + weight_unc[0])
@@ -23,6 +35,7 @@ def Mass(cfg: GTMConfig) -> None:
     iyz = nominal[4] * (1.0 + inertia_unc[4])
     ixy = nominal[5] * (1.0 + inertia_unc[5])
     inertia = fr.math.matrix([[ixx, -ixy, -ixz], [-ixy, iyy, -iyz], [-ixz, -iyz, izz]])
+    # Closed-form inverse avoids a backend-specific matrix inverse operation.
     determinant = (
         ixx * iyy * izz
         - ixx * iyz**2

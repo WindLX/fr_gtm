@@ -93,6 +93,9 @@ example-trim:
 example-backends:
     uv run python examples/backend_compare.py
 
+example-ground *ARGS:
+    uv run python examples/ground_operations.py {{ARGS}}
+
 # 使用 fly_stick 手柄控制 GTM，并可选发送 fly_ruler_proto 状态
 example-fly-stick *ARGS:
     uv run --group fly-stick python examples/fly_stick_gtm.py {{ARGS}}
@@ -100,6 +103,16 @@ example-fly-stick *ARGS:
 # 使用主动侧杆控制升降舵/副翼，T16000 控制方向舵/油门
 example-active-sidestick *ARGS:
     uv run --group fly-stick python -m examples.fly_active_sidestick_gtm {{ARGS}}
+
+# 运行全部离线示例
+test-examples: example-inspect example-simulate example-disturbances example-trim example-backends
+    uv run python examples/ground_operations.py --duration 0.01
+    echo "✓ All offline examples passed!"
+
+# 无硬件运行两个实时手柄示例
+test-examples-stick:
+    uv run python examples/fly_stick_gtm.py --dry-run --backend numpy --duration 0.03
+    uv run --group fly-stick python -m examples.fly_active_sidestick_gtm --dry-run --duration 0.03
 
 # ============================================================
 # 清理

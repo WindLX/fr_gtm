@@ -2,7 +2,11 @@ from dataclasses import dataclass
 
 import pytest
 
-from fr_gtm.stick_input import StickAxes, merge_active_sidestick_axes
+from fr_gtm.stick_input import (
+    STICK_VISUAL_MODEL_ID,
+    StickAxes,
+    merge_active_sidestick_axes,
+)
 
 
 @dataclass(frozen=True)
@@ -22,6 +26,10 @@ class ActiveState:
     stick_2: StickTelemetry
     connected: bool = True
     stale: bool = False
+
+
+def test_stick_examples_select_the_737_visual_profile() -> None:
+    assert STICK_VISUAL_MODEL_ID == "boeing_737_800"
 
 
 def test_active_sidestick_replaces_roll_pitch_only() -> None:

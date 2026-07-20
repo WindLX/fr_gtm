@@ -50,7 +50,9 @@ def _parameters(model: fr.CompiledModel[Any], p: np.ndarray) -> np.ndarray:
         model.p.build(
             {
                 "Root.wind.params::wind_speed": p[0:1],
-                "Root.wind.params::wind_direction": p[1:2],
+                # Frozen gtm_ad parameters store engineering wind direction in
+                # degrees; FlyRuler's corrected public parameter is radians.
+                "Root.wind.params::wind_direction": np.deg2rad(p[1:2]),
                 "Root.wind.params::turbulence_level": p[2:3],
                 "Root.mass::weight_unc": p[3:4],
                 "Root.mass::inertia_unc": p[4:10],

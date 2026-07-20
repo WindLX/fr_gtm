@@ -18,7 +18,8 @@ from .config import (
     WindConfig,
 )
 from .constants import DDIM, NDIM, PDIM, UDIM, XDIM, YDIM
-from .system import GTMSystem, build_initial_state
+from .proto_projection import airdata_angles_to_proto_radians
+from .system import GTMSystem, build_ground_initial_state, build_initial_state
 
 __all__ = [
     "ActuatorConfig",
@@ -43,5 +44,7 @@ __all__ = [
     "WindConfig",
     "XDIM",
     "YDIM",
+    "airdata_angles_to_proto_radians",
+    "build_ground_initial_state",
     "build_initial_state",
 ]

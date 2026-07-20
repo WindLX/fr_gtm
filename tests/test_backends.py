@@ -7,9 +7,9 @@ import fly_ruler_core as fr
 import numpy as np
 import pytest
 from fly_ruler_core._core import PyCompiler
-from fly_ruler_core.codegen import JAXCodeGen
+from fly_ruler_core.codegen.jax_backend import JAXCodeGen
 
-from fr_gtm import GTMConfig, GTMSystem
+from fr_gtm import GTMConfig, GTMSystem, build_ground_initial_state
 
 BACKEND_REFERENCE = np.load(
     Path(__file__).parent / "data" / "gtm_backend_trajectory.npz",
@@ -18,8 +18,8 @@ BACKEND_REFERENCE = np.load(
 TRAJECTORY_BACKENDS = ("numpy", "casadi", "native", "jax")
 
 
-def _builder() -> fr.PyIrBuilder:
-    builder = GTMSystem(GTMConfig.default(), name="Root")
+def _builder(*, enable_ground: bool = False) -> fr.PyIrBuilder:
+    builder = GTMSystem(GTMConfig.default(enable_ground=enable_ground), name="Root")
     if not isinstance(builder, fr.PyIrBuilder):
         raise TypeError("expected top-level GTM builder")
     return builder
@@ -58,7 +58,7 @@ def _parameters(model: Any, p: np.ndarray) -> np.ndarray:
         model.p.build(
             {
                 "Root.wind.params::wind_speed": p[0:1],
-                "Root.wind.params::wind_direction": p[1:2],
+                "Root.wind.params::wind_direction": np.deg2rad(p[1:2]),
                 "Root.wind.params::turbulence_level": p[2:3],
                 "Root.mass::weight_unc": p[3:4],
                 "Root.mass::inertia_unc": p[4:10],
@@ -87,7 +87,7 @@ def _inputs(model: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 
 @lru_cache(maxsize=None)
-def _compiled_backend(name: str) -> Any:
+def _compiled_backend(name: str, *, enable_ground: bool = False) -> Any:
     dt = float(BACKEND_REFERENCE["dt"])
     if name == "jax":
         jax = pytest.importorskip("jax")
@@ -95,21 +95,21 @@ def _compiled_backend(name: str) -> Any:
         backend = fr.backends.jax
         return fr.Compiler(
             fr.CompilerSpec(backend=backend, integrator="rk4", dt=dt)
-        ).compile(_builder())
+        ).compile(_builder(enable_ground=enable_ground))
     if name == "native":
         try:
-            from fly_ruler_std.codegen import CodegenConfig, codegen
+            from fly_ruler_core.codegen import NativeCodegenSpec, codegen
         except ImportError as exc:
             pytest.skip(f"native codegen dependencies are not available: {exc}")
         casadi_model = fr.Compiler(
             fr.CompilerSpec(backend=fr.backends.casadi, integrator="rk4", dt=dt)
-        ).compile(_builder())
-        return codegen(casadi_model, CodegenConfig(batch_size=1))
+        ).compile(_builder(enable_ground=enable_ground))
+        return codegen(casadi_model, NativeCodegenSpec(batch_size=1))
 
     backend = {"numpy": fr.backends.numpy, "casadi": fr.backends.casadi}[name]
     return fr.Compiler(
         fr.CompilerSpec(backend=backend, integrator="rk4", dt=dt)
-    ).compile(_builder())
+    ).compile(_builder(enable_ground=enable_ground))
 
 
 @lru_cache(maxsize=None)
@@ -226,8 +226,87 @@ def test_casadi_matches_numpy() -> None:
 
 def test_jax_source_is_valid_python() -> None:
     plan = PyCompiler.compile_from_builder(_builder())
-    source = JAXCodeGen().generate_source(plan, dt=0.01, integrator="euler")
+    source = JAXCodeGen()._render_source(plan, dt=0.01, integrator="euler")
     compile(source, "<fr_gtm_jax>", "exec")
+
+
+@pytest.mark.parametrize("backend", TRAJECTORY_BACKENDS)
+def test_ground_contact_one_step_matches_numpy(backend: str) -> None:
+    cfg = GTMConfig.default(enable_ground=True)
+    reference = _compiled_backend("numpy", enable_ground=True)
+    candidate = _compiled_backend(backend, enable_ground=True)
+    reference_x = build_ground_initial_state(
+        reference,
+        cfg,
+        forward_speed_mps=20.0,
+    )
+    candidate_x = build_ground_initial_state(
+        candidate,
+        cfg,
+        forward_speed_mps=20.0,
+    )
+    reference_u = reference.u.build(
+        {"Root::u": np.zeros(4), "Root::d": np.zeros(4), "Root::n": np.zeros(21)}
+    )
+    candidate_u = candidate.u.build(
+        {"Root::u": np.zeros(4), "Root::d": np.zeros(4), "Root::n": np.zeros(21)}
+    )
+    reference_result = reference.discrete_fn(
+        0.0,
+        reference_x,
+        reference.xd.build(),
+        reference_u,
+        reference.p.default(),
+    )
+    if backend == "casadi":
+        t_sym = ca.SX.sym("ground_t")
+        x_sym = ca.SX.sym("ground_x", candidate.module.n_x)
+        xd_sym = ca.SX.sym("ground_xd", candidate.module.n_xd)
+        u_sym = ca.SX.sym("ground_u", candidate.module.n_u)
+        p_sym = ca.SX.sym("ground_p", candidate.module.n_p)
+        step_fn = ca.Function(
+            "fr_gtm_ground_backend_test",
+            [t_sym, x_sym, xd_sym, u_sym, p_sym],
+            list(candidate.discrete_fn(t_sym, x_sym, xd_sym, u_sym, p_sym)),
+        )
+        candidate_result = step_fn(
+            0.0,
+            candidate_x,
+            candidate.xd.build(),
+            candidate_u,
+            candidate.p.default(),
+        )
+    else:
+        candidate_result = candidate.discrete_fn(
+            0.0,
+            candidate_x,
+            candidate.xd.build(),
+            candidate_u,
+            candidate.p.default(),
+        )
+    rtol = 1.0e-7 if backend == "jax" else 1.0e-9
+    atol = 1.0e-8 if backend == "jax" else 1.0e-9
+    np.testing.assert_allclose(
+        _as_numpy(candidate_result[0]),
+        _as_numpy(reference_result[0]),
+        rtol=rtol,
+        atol=atol,
+    )
+    reference_outputs = reference.y.read(_as_numpy(reference_result[2]), by="path")
+    candidate_outputs = candidate.y.read(_as_numpy(candidate_result[2]), by="path")
+    for path in (
+        "Root::ground_force_body",
+        "Root::ground_moment_body",
+        "Root::ground_normal_forces",
+        "Root::ground_longitudinal_forces",
+        "Root::ground_lateral_forces",
+    ):
+        np.testing.assert_allclose(
+            _as_numpy(candidate_outputs[path]),
+            _as_numpy(reference_outputs[path]),
+            rtol=rtol,
+            atol=atol,
+        )
 
 
 @pytest.mark.parametrize("backend", TRAJECTORY_BACKENDS)

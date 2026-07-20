@@ -12,9 +12,11 @@ __pycache__/
 *.lib
 
 results/
+results_active_sidestick/
 dist/
 
 generated_*_flyruler.py
 generated_*_assets.npz
 generated_*_layout.md
 gtm_system.json
+/build/
