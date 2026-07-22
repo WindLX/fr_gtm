@@ -80,6 +80,8 @@ uv run python examples/backend_compare.py
 
 The five offline examples keep their single-rate simulation flow explicit and use direct `for` loops where stepping is required. The T16000 and ActiveSidestick examples are multi-rate realtime systems, so they use std `run_async_realtime` tasks for input, dynamics, output/feedback, telemetry and recording.
 
+`just benchmark-jax-compile` is a non-default developer benchmark for the complete RK4 GTM. It records generated source size, maximum line width, JAXPR equation counts, StableHLO sizes, and separate trace/lower/compile times for `continuous_fn` and `discrete_fn`; machine-specific JSON is written to ignored `build/jax_compile_benchmark.json` and is not frozen reference data.
+
 Interactive stick control:
 
 ```bash

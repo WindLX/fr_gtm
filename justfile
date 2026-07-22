@@ -93,6 +93,10 @@ example-trim:
 example-backends:
     uv run python examples/backend_compare.py
 
+# Measure generated JAX graph size and local trace/lower/compile latency.
+benchmark-jax-compile:
+    JAX_PLATFORMS=cpu XLA_PYTHON_CLIENT_PREALLOCATE=false JAX_ENABLE_X64=true uv run --extra jax python examples/benchmark_jax_compile.py
+
 example-ground *ARGS:
     uv run python examples/ground_operations.py {{ARGS}}
 
