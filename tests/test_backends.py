@@ -1,4 +1,3 @@
-import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -7,8 +6,6 @@ import casadi as ca
 import fly_ruler_core as fr
 import numpy as np
 import pytest
-from fly_ruler_core._core import PyCompiler
-from fly_ruler_core.codegen.jax_backend import JAXCodeGen
 
 from fr_gtm import GTMConfig, GTMSystem, build_ground_initial_state
 
@@ -91,8 +88,6 @@ def _inputs(model: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 def _compiled_backend(name: str, *, enable_ground: bool = False) -> Any:
     dt = float(BACKEND_REFERENCE["dt"])
     if name == "jax":
-        os.environ["JAX_PLATFORMS"] = "cpu"
-        os.environ["JAX_ENABLE_X64"] = "1"
         pytest.importorskip("jax")
         backend: fr.Backend[Any] = fr.backends.jax
         return fr.Compiler(
@@ -224,12 +219,6 @@ def test_casadi_matches_numpy() -> None:
     np.testing.assert_allclose(
         _as_numpy(y_value), _as_numpy(numpy_y), rtol=1e-9, atol=1e-9
     )
-
-
-def test_jax_source_is_valid_python() -> None:
-    plan = PyCompiler.compile_from_builder(_builder())
-    source = JAXCodeGen()._render_source(plan, dt=0.01, integrator="euler")
-    compile(source, "<fr_gtm_jax>", "exec")
 
 
 @pytest.mark.parametrize("backend", TRAJECTORY_BACKENDS)

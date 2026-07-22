@@ -63,6 +63,30 @@ def test_initial_state_and_outputs_are_finite() -> None:
     assert np.isfinite(xdot).all()
     assert np.isfinite(outputs["y"]).all()
     assert outputs["clean_y"].shape == (21,)
+    assert outputs["feedback_y"].shape == (17,)
+    assert outputs["clean_feedback_y"].shape == (17,)
+    np.testing.assert_array_equal(outputs["feedback_y"], outputs["y"][:17])
+    np.testing.assert_array_equal(outputs["clean_feedback_y"], outputs["clean_y"][:17])
+
+
+def test_command_telemetry_is_excluded_from_feedback() -> None:
+    """Controller feedback must not have direct feedthrough from root command."""
+
+    model = _compile()
+    x = build_initial_state(model)
+    outputs = []
+    for command in (np.zeros(4), np.array([2.0, -3.0, 1.0, 75.0])):
+        values: Mapping[str | VariableInfo, Any] = {
+            "Root::u": command,
+            "Root::d": np.zeros(4),
+            "Root::n": np.zeros(21),
+        }
+        u = model.u.build(values)
+        _, _, y, _ = model.continuous_fn(0.0, x, model.xd.build(), u, model.p.build())
+        outputs.append(model.y.read(y))
+
+    np.testing.assert_array_equal(outputs[0]["feedback_y"], outputs[1]["feedback_y"])
+    assert not np.array_equal(outputs[0]["y"][17:], outputs[1]["y"][17:])
 
 
 def test_short_integration_preserves_quaternion_norm() -> None:

@@ -21,10 +21,10 @@ def main() -> None:
     ).compile(builder)
     assert model.artifact is not None
 
-    print(f"artifact: {model.artifact.system_path}")
-    print(f"topology: {model.artifact.files[fr.ArtifactFile.SYSTEM_IR]}")
-    print(f"source:   {model.artifact.files[fr.ArtifactFile.BACKEND_SOURCE]}")
-    print(f"layout:   {model.artifact.files[fr.ArtifactFile.LAYOUT]}")
+    print(f"artifact: {model.artifact.path}")
+    print(f"topology: {model.artifact.file(fr.ArtifactFile.SYSTEM_IR)}")
+    print(f"source:   {model.artifact.file(fr.ArtifactFile.BACKEND_SOURCE)}")
+    print(f"layout:   {model.artifact.file(fr.ArtifactFile.LAYOUT)}")
     print(f"cache:    {'hit' if model.artifact.cache_hit else 'miss'}")
     print(
         f"sizes: x={model.n_x}, xdot={model.n_xdot}, "

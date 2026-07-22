@@ -12,3 +12,6 @@ NDIM = 21
 # Output vector: gamma(1) + alpha(1) + beta(1) + V(1) + altitude(1) + euler(3) +
 #                omega(3) + nz(1) + qbar(1) + act_pos(4) + act_cmd(4) = 21
 YDIM = 21
+# Causal feedback prefix: every measured physical quantity through actual
+# actuator position, excluding the four commanded-actuator telemetry channels.
+FEEDBACK_YDIM = 17

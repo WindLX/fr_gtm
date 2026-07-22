@@ -1,6 +1,5 @@
 """Compare one GTM evaluation across NumPy, CasADi, and optional JAX."""
 
-import os
 from importlib.util import find_spec
 from pathlib import Path
 from time import perf_counter
@@ -20,8 +19,13 @@ def main() -> None:
         ("casadi", fr.backends.casadi),
     ]
     if find_spec("jax") is not None:
-        os.environ["JAX_PLATFORM_NAME"] = "cpu"
-        os.environ["JAX_ENABLE_X64"] = "1"
+        fr.configure_jax_runtime(
+            fr.JaxRuntimePolicy(
+                platforms=("cpu",),
+                preallocate=False,
+                enable_x64=True,
+            )
+        )
         backends.append(("jax", fr.backends.jax))
     else:
         print("JAX is not installed; skipping it.")

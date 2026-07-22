@@ -128,8 +128,9 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
     load_factor = non_gravitational_force / (-mass.weight[0])
     nz = fr.math.vector([load_factor[2]])
 
-    # Sensor assembles its documented 21 channels, then applies bias, scale and
-    # externally supplied noise without feeding measurements back into physics.
+    # Physical feedback deliberately excludes command telemetry. This makes it
+    # causal when a controller is nested around GTMSystem. The legacy 21-vector
+    # is concatenated below so external users retain the frozen gtm_ad layout.
     aero.gamma >> sensor.gamma
     aero.alpha >> sensor.alpha
     aero.beta >> sensor.beta
@@ -140,14 +141,18 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
     nz >> sensor.nz
     aero.qbar >> sensor.qbar
     actuator.position_out >> sensor.act_pos
-    u >> sensor.act_cmd
-    n >> sensor.noise
+    n[:17] >> sensor.noise
+
+    clean_y = fr.math.concatenate([sensor.clean_feedback, u])
+    measurement = fr.math.concatenate([sensor.feedback, u])
 
     quat_dot_reference = Quaternion.derivative(eom.quat_out, eom.omega_body_out)
 
     fr.export(
-        y=sensor.measurement,
-        clean_y=sensor.clean_y,
+        y=measurement,
+        clean_y=clean_y,
+        feedback_y=sensor.feedback,
+        clean_feedback_y=sensor.clean_feedback,
         pos_ned=eom.pos_ned_out,
         vel_body=eom.vel_body_out,
         vel_ned=eom.velocity_ned,

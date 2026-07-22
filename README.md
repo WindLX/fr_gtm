@@ -11,7 +11,7 @@ wind, uncertainty, and sensor behavior are numerically aligned with
   - actuator position(4)
   - Dryden filter state(8)
 - Root inputs: `u(4)`, `d(4)`, `n(21)`
-- Main outputs: `y(21)`, `clean_y(21)`
+- Main outputs: `y(21)`, `clean_y(21)`, causal `feedback_y(17)`, and `clean_feedback_y(17)`
 - Tunable parameters: wind(5) and uncertainty(28); `Root.wind.params::wind_direction` uses radians
 
 The system is assembled from explicit physical blocks:
@@ -52,6 +52,8 @@ xdot, _, y, _ = model.continuous_fn(
 )
 print(model.y.read(y)["clean_y"])
 ```
+
+`feedback_y` is exactly `y[:17]`: it ends at actual actuator position and excludes the four actuator-command telemetry channels. Internally connected controllers should use this causal output. The historical 21-channel vectors retain their original ordering and values for reference compatibility and logging.
 
 All state, input, output, and parameter overrides use complete paths such as
 `Root.eom::vel_body` and `Root.wind.params::wind_speed`.

@@ -15,7 +15,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-jax = ["jax[cuda12]>=0.8.2", "fly-ruler-core[all]"]
+jax = ["jax>=0.8.2", "fly-ruler-core[all]"]
+jax-cuda12 = ["jax[cuda12]>=0.8.2", "fly-ruler-core[all]"]
+jax-cuda13 = ["jax[cuda13]>=0.8.2", "fly-ruler-core[all]"]
 all = ["fr-gtm[jax]"]
 
 [tool.uv.sources]

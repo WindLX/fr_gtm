@@ -1,30 +1,27 @@
-"""GTM fixed-layout observation and externally driven sensor errors."""
+"""Causal GTM physical feedback with externally driven sensor errors."""
 
 import fly_ruler_core as fr
 
 from ..config import SensorConfig
-from ..constants import YDIM
+from ..constants import FEEDBACK_YDIM
 
 _DEFAULT_CONFIG = SensorConfig()
 
 
 @fr.block
 def Sensor(cfg: SensorConfig = _DEFAULT_CONFIG) -> None:
-    """Assemble clean output and apply configured bias, scale and noise.
+    """Assemble the 17 physical feedback channels and apply sensor errors.
 
-    Inputs (individual signals):
-        gamma(1,), alpha(1,), beta(1,), V(1,), altitude(1,),
-        euler(3,), omega_body(3,), nz(1,), qbar(1,),
-        act_pos(4,), act_cmd(4,), noise(21,)
+    The historical GTM observation appends four actuator-command telemetry
+    values. Those values are intentionally assembled in :mod:`fr_gtm.system`,
+    outside this block. Keeping a command input out of the physical sensor is
+    what makes ``feedback_y`` a causal signal suitable for an internally
+    connected controller.
 
-    Outputs:
-        clean_y(21,) — clean GTM output vector
-        measurement(21,) — ``bias + scale*clean_y + noise_std*noise``
-
-    ``noise`` contains standardized samples and is never generated internally.
     Aerodynamic angles, Euler attitude and body rates are exported in degrees
-    to preserve the gtm_ad measurement layout; core dynamics remain SI/radian.
+    to preserve the frozen gtm_ad layout; the dynamics themselves use radians.
     """
+
     gamma = fr.input("gamma", (1,), unit="deg", description="Flight path angle")
     alpha = fr.input("alpha", (1,), unit="deg", description="Angle of attack")
     beta = fr.input("beta", (1,), unit="deg", description="Sideslip angle")
@@ -34,35 +31,26 @@ def Sensor(cfg: SensorConfig = _DEFAULT_CONFIG) -> None:
     omega_body = fr.input("omega_body", (3,), unit="rad/s", description="Body rates")
     nz = fr.input("nz", (1,), description="Normal load factor")
     qbar = fr.input("qbar", (1,), unit="Pa", description="Dynamic pressure")
-    act_pos = fr.input("act_pos", (4,), description="Actuator positions")
-    act_cmd = fr.input("act_cmd", (4,), description="Actuator commands")
-    noise = fr.input("noise", (YDIM,), description="Sensor noise vector")
-
-    # Convert only at the measurement boundary. Physics stays in radians.
-    euler_deg = fr.math.degrees(euler)
-    omega_deg = fr.math.degrees(omega_body)
-
-    # Assemble clean_y: [gamma, alpha, beta, V, altitude, euler(3), omega(3),
-    #                    nz, qbar, act_pos(4), act_cmd(4)] → 21 elements
-    clean_y = fr.math.concatenate(
-        [
-            gamma,  # 1
-            alpha,  # 2
-            beta,  # 3
-            V,  # 4
-            altitude,  # 5
-            euler_deg,  # 6,7,8
-            omega_deg,  # 9,10,11
-            nz,  # 12
-            qbar,  # 13
-            act_pos,  # 14,15,16,17
-            act_cmd,  # 18,19,20,21
-        ]
+    act_pos = fr.input("act_pos", (4,), description="Actual actuator positions")
+    noise = fr.input(
+        "noise", (FEEDBACK_YDIM,), description="Standardized physical sensor noise"
     )
 
-    # The final five command/actual-throttle channels have no modeled sensor
-    # error in the reference implementation and therefore use identity/zero.
-    bias_vec = fr.math.vector(
+    clean_feedback = fr.math.concatenate(
+        [
+            gamma,
+            alpha,
+            beta,
+            V,
+            altitude,
+            fr.math.degrees(euler),
+            fr.math.degrees(omega_body),
+            nz,
+            qbar,
+            act_pos,
+        ]
+    )
+    bias = fr.math.vector(
         [
             cfg.gamma.bias,
             cfg.alpha.bias,
@@ -80,14 +68,10 @@ def Sensor(cfg: SensorConfig = _DEFAULT_CONFIG) -> None:
             cfg.elevator.bias,
             cfg.aileron.bias,
             cfg.rudder.bias,
-            0.0,  # thr_act bias
-            0.0,  # elev_cmd bias
-            0.0,  # ail_cmd bias
-            0.0,  # rud_cmd bias
-            0.0,  # thr_cmd bias
+            0.0,
         ]
     )
-    scale_vec = fr.math.vector(
+    scale = fr.math.vector(
         [
             cfg.gamma.scale,
             cfg.alpha.scale,
@@ -106,13 +90,9 @@ def Sensor(cfg: SensorConfig = _DEFAULT_CONFIG) -> None:
             cfg.aileron.scale,
             cfg.rudder.scale,
             1.0,
-            1.0,
-            1.0,
-            1.0,
-            1.0,
         ]
     )
-    noise_std_vec = fr.math.vector(
+    noise_std = fr.math.vector(
         [
             cfg.gamma.noise_std,
             cfg.alpha.noise_std,
@@ -131,19 +111,8 @@ def Sensor(cfg: SensorConfig = _DEFAULT_CONFIG) -> None:
             cfg.aileron.noise_std,
             cfg.rudder.noise_std,
             0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
         ]
     )
-
-    measurement = bias_vec + scale_vec * clean_y + noise * noise_std_vec
-
-    fr.output("clean_y", clean_y, dim=(YDIM,), description="Clean GTM output vector")
-    fr.output(
-        "measurement",
-        measurement,
-        dim=(YDIM,),
-        description="Noisy sensor measurement",
-    )
+    feedback = bias + scale * clean_feedback + noise * noise_std
+    fr.output("clean_feedback", clean_feedback, dim=(FEEDBACK_YDIM,))
+    fr.output("feedback", feedback, dim=(FEEDBACK_YDIM,))

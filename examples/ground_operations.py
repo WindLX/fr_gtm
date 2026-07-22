@@ -63,6 +63,13 @@ def main(
             ),
         )
     elif backend == "jax":
+        fr.configure_jax_runtime(
+            fr.JaxRuntimePolicy(
+                platforms=("cpu",),
+                preallocate=False,
+                enable_x64=True,
+            )
+        )
         model = cast(
             fr.CompiledModel[object],
             fr.Compiler(
