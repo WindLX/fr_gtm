@@ -103,7 +103,13 @@ def _compiled_backend(name: str, *, enable_ground: bool = False) -> Any:
         ).compile(_builder(enable_ground=enable_ground))
         return codegen(casadi_model, NativeCodegenSpec(batch_size=1))
 
-    backend = {"numpy": fr.backends.numpy, "casadi": fr.backends.casadi}[name]
+    if name == "numpy":
+        backend = fr.backends.numpy
+    elif name == "casadi":
+        backend = fr.backends.casadi
+    else:
+        raise ValueError(f"unsupported backend: {name}")
+    assert isinstance(backend, fr.Backend)
     return fr.Compiler(
         fr.CompilerSpec(backend=backend, integrator="rk4", dt=dt)
     ).compile(_builder(enable_ground=enable_ground))

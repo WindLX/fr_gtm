@@ -22,7 +22,7 @@ setup:
 # 安装手柄控制示例的可选依赖
 setup-stick:
     echo "Synchronizing optional fly-stick dependencies..."
-    uv sync --group fly-stick
+    uv run --with-editable ../../packages/fly_stick --with-editable ../../packages/fly_ruler_proto/bindings/python python -c "import fly_stick, fly_ruler_proto_python"
     echo "✓ fly-stick example setup complete!"
 
 # ============================================================
@@ -102,11 +102,11 @@ example-ground *ARGS:
 
 # 使用 fly_stick 手柄控制 GTM，并可选发送 fly_ruler_proto 状态
 example-fly-stick *ARGS:
-    uv run --group fly-stick python examples/fly_stick_gtm.py {{ARGS}}
+    uv run --with-editable ../../packages/fly_stick --with-editable ../../packages/fly_ruler_proto/bindings/python python examples/fly_stick_gtm.py {{ARGS}}
 
 # 使用主动侧杆控制升降舵/副翼，T16000 控制方向舵/油门
 example-active-sidestick *ARGS:
-    uv run --group fly-stick python -m examples.fly_active_sidestick_gtm {{ARGS}}
+    uv run --with-editable ../../packages/fly_stick --with-editable ../../packages/fly_ruler_proto/bindings/python python -m examples.fly_active_sidestick_gtm {{ARGS}}
 
 # 运行全部离线示例
 test-examples: example-inspect example-simulate example-disturbances example-trim example-backends
@@ -116,7 +116,7 @@ test-examples: example-inspect example-simulate example-disturbances example-tri
 # 无硬件运行两个实时手柄示例
 test-examples-stick:
     uv run python examples/fly_stick_gtm.py --dry-run --backend numpy --duration 0.03
-    uv run --group fly-stick python -m examples.fly_active_sidestick_gtm --dry-run --duration 0.03
+    uv run --with-editable ../../packages/fly_stick --with-editable ../../packages/fly_ruler_proto/bindings/python python -m examples.fly_active_sidestick_gtm --dry-run --duration 0.03
 
 # ============================================================
 # 清理

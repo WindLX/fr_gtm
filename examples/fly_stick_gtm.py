@@ -320,10 +320,14 @@ def compile_model(
         print(f"native module ready: {cache_state} in {elapsed:.2f}s")
         return native
 
-    backend_obj = {
-        "numpy": fr.backends.numpy,
-        "casadi": fr.backends.casadi,
-    }[backend]
+    if backend == "numpy":
+        backend_obj = fr.backends.numpy
+    elif backend == "casadi":
+        backend_obj = fr.backends.casadi
+    else:
+        raise ValueError(f"unsupported backend: {backend}")
+    if not isinstance(backend_obj, fr.Backend):
+        raise RuntimeError(f"backend {backend!r} is unavailable")
     print(f"compiling GTM with {backend} backend (Python runtime)...")
     return fr.Compiler(
         fr.CompilerSpec(backend=backend_obj, integrator=integrator, dt=dt)
