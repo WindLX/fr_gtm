@@ -1,8 +1,7 @@
-"""Top-level GTM wiring in NED navigation and FRD body coordinates.
+"""GTM 顶层接线，使用 NED 导航系与 FRD 机体系。
 
-The root system only connects semantic actuator, wind, mass, aerodynamic,
-engine, rigid-body and sensor components. GTM-specific table/sign conventions
-remain inside their owning blocks; std owns actuator and 6-DOF integration.
+根系统只连接语义化的作动器、风、质量、气动、发动机、刚体与传感器组件；
+GTM 特有的表格与符号约定留在各自的 Block 内，标准库负责作动器与 6 自由度积分。
 """
 
 from __future__ import annotations
@@ -28,11 +27,18 @@ _DEFAULT_CONFIG = GTMConfig.default()
 
 @fr.system
 def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
-    """Assemble the 25-state GTM plant and fixed 21-channel observation.
+    """组装 25 状态 GTM 被控对象与固定 21 通道观测。
 
-    ``u`` follows ``[elevator_deg, aileron_deg, rudder_deg, throttle_percent]``;
-    ``d`` drives the four Dryden filters and ``n`` supplies standardized sensor
-    samples. All randomness is external, so zero inputs are deterministic.
+    Args:
+        cfg: GTM 配置，给出几何、发动机、作动器、传感器、气动表与地面接触
+            参数；`is_fullscale` 与 `mode` 在编译期决定派生数据。
+
+    Note:
+        根输入 `u(4,)` 为 `[elevator_deg, aileron_deg, rudder_deg,
+        throttle_percent]`，`d(4,)` 驱动四个 Dryden 滤波器，`n(21,)` 提供
+        标准化传感器噪声。所有随机量都由外部输入，因此零输入下系统是
+        确定性的。`feedback_y` 只含 17 个物理量，刻意不含四个作动器指令
+        遥测通道，便于在内层接入控制器。
     """
     u = fr.input(
         "u",
@@ -196,10 +202,18 @@ def build_initial_state(
     model: fr.CompiledModel[Any],
     cfg: GTMConfig = _DEFAULT_CONFIG,
 ) -> np.ndarray:
-    """Build the default 25-element physical state using complete paths.
+    """用完整路径构建默认的 25 元物理初始状态。
 
-    Layout comprises 13 stored rigid-body values, four actuator states and
-    eight Dryden shaping-filter states. Quaternion storage is scalar-first.
+    Args:
+        model: 编译后的 GTM 模型，提供 `x.build` 状态索引。
+        cfg: GTM 配置；当前实现不读取该参数，保留它是为了统一调用签名。
+
+    Returns:
+        np.ndarray: 长度为 25 的浮点状态向量，依次为 13 个刚体状态、4 个
+            作动器状态与 8 个 Dryden 成形滤波器状态，四元数按标量在前排列。
+
+    Note:
+        默认为机体系 50 m/s 前向速度，姿态与角速率为零，位置在 NED 原点。
     """
     del cfg
     return np.asarray(
@@ -230,12 +244,26 @@ def build_ground_initial_state(
     altitude_agl_m: float = 0.0,
     sink_rate_mps: float = 0.0,
 ) -> np.ndarray:
-    """Build a runway-relative state for ground roll or touchdown.
+    """构建跑道相对的地面滑行或接地初始状态。
 
-    ``forward_speed_mps`` is horizontal speed along NED North and
-    ``sink_rate_mps`` is positive NED Down speed. They are rotated into FRD
-    before populating the rigid-body state, so a pitched ground attitude does
-    not create an unintended climb or sink rate.
+    Args:
+        model: 编译后的 GTM 模型，提供 `x.build` 状态索引。
+        cfg: GTM 配置，提供地面接触点与参考重量，用于解算静态停机姿态。
+        forward_speed_mps: 沿 NED 北向的水平速度，单位 m/s，须为有限非负值。
+        altitude_agl_m: 离地高度，单位 m，须为有限非负值。
+        sink_rate_mps: 沿 NED 下向的下降率，单位 m/s，须为有限非负值。
+
+    Returns:
+        np.ndarray: 长度为 25 的浮点状态向量，姿态由静态地面姿态与
+            `altitude_agl_m` 决定，机体系速度由 NED 速度旋转得到。
+
+    Raises:
+        ValueError: 任一速度或高度参数非有限或为负时抛出。
+
+    Note:
+        `forward_speed_mps` 是水平速度，`sink_rate_mps` 是 NED 下向速度；
+        两者在写入刚体状态前旋转到 FRD，因此带俯仰的停机姿态不会引入额外的
+        爬升或下降率。
     """
 
     if not np.isfinite(forward_speed_mps) or forward_speed_mps < 0.0:

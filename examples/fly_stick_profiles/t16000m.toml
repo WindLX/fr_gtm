@@ -3,6 +3,7 @@ author = "WindLX"
 created = "2026-07-08"
 description = "Default fr_gtm fly_stick profile for Thrustmaster T.16000M"
 
+# Axes
 [[axes]]
 code = 0
 alias = "ABS_X"
@@ -19,6 +20,7 @@ alias = "ABS_RZ"
 code = 6
 alias = "ABS_THROTTLE"
 
+# Buttons
 [[buttons]]
 code = 288
 alias = "BTN_TRIGGER"
@@ -68,9 +70,19 @@ code = 299
 alias = "BTN_BASE6"
 
 [[buttons]]
+code = 300
+
+[[buttons]]
+code = 301
+
+[[buttons]]
+code = 302
+
+[[buttons]]
 code = 303
 alias = "BTN_DEAD"
 
+# Hats
 [[hats]]
 code = 16
 alias = "ABS_HAT0X"

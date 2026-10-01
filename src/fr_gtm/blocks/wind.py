@@ -1,4 +1,4 @@
-"""GTM wind subsystem composed from standard wind blocks."""
+"""由标准风 Block 组合而成的 GTM 风子系统。"""
 
 import fly_ruler_core as fr
 from fly_ruler_std.blocks.wind import (
@@ -15,11 +15,11 @@ from ..config import GTMConfig
 
 @fr.block
 def WindParams() -> None:
-    """Runtime wind parameters shared by steady and turbulence blocks.
+    """稳态风与湍流 Block 共享的运行时风参数。
 
-    Direction is radians clockwise from NED North. SteadyWind and Dryden now
-    consume the same SI angular unit, so no model-specific conversion or
-    compatibility branch is required.
+    Note:
+        风向为从 NED 北向顺时针的弧度。`SteadyWind` 与 `DrydenTurbulence`
+        现在消费同一套 SI 角度单位，因此无需模型侧换算或兼容分支。
     """
     wind_speed = fr.param("wind_speed", (1,), default=[0.0], unit="m/s")
     wind_direction = fr.param("wind_direction", (1,), default=[0.0], unit="rad")
@@ -32,12 +32,15 @@ def WindParams() -> None:
 
 @fr.system
 def Wind(cfg: GTMConfig) -> None:
-    """Compose shear-corrected steady wind and gated Dryden turbulence.
+    """组合经风切变修正的稳态风与带门控的 Dryden 湍流。
 
-    Body-velocity magnitude drives Dryden filter time constants. It deliberately
-    does not use wind-corrected TAS, which would create a block-level algebraic
-    loop through the aerodynamic model. A zero turbulence parameter gates both
-    excitation and outputs while retaining the standard Dryden state layout.
+    Args:
+        cfg: GTM 配置，提供跑道高度、低空风强度、高空尺度长度与翼展。
+
+    Note:
+        Dryden 滤波器时间常数由机体系速度模值驱动，刻意不使用经风修正的
+        真空速，否则会经气动模型形成 Block 级代数环。湍流参数为零时同时
+        门控激励与输出，但保留标准 Dryden 状态布局不变。
     """
     altitude = fr.input("altitude", (1,), unit="m")
     velocity = fr.input("velocity", (3,), unit="m/s")

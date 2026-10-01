@@ -1,1 +1,1 @@
-"""Runnable fr_gtm examples."""
+"""fr_gtm 的可运行示例包。"""

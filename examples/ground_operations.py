@@ -1,4 +1,4 @@
-"""Simulate a GTM takeoff roll or touchdown with shared std ground contact."""
+"""用共享的 std 地面接触模型仿真 GTM 起飞滑跑或接地。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,15 @@ def main(
     dt: Annotated[float, typer.Option(min=0.0001)] = 0.01,
     output_dir: Annotated[Path, typer.Option()] = Path("results/gtm_ground"),
 ) -> None:
-    """Run one deterministic runway-relative GTM scenario."""
+    """运行一次确定的跑道相对 GTM 场景。
+
+    Args:
+        scenario: 场景名，取 `takeoff` 或 `touchdown`。
+        backend: 数值后端，取 `numpy`、`casadi`、`jax` 或 `native`。
+        duration: 仿真时长，单位 s，必须为正。
+        dt: 积分步长，单位 s，必须为正。
+        output_dir: 结果输出目录。
+    """
 
     if scenario not in {"takeoff", "touchdown"}:
         raise typer.BadParameter("scenario must be takeoff or touchdown")

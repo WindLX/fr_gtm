@@ -1,4 +1,4 @@
-"""Compare one GTM evaluation across NumPy, CasADi, and optional JAX."""
+"""在 NumPy、CasADi 与可选 JAX 后端之间比较同一次 GTM 求值。"""
 
 from importlib.util import find_spec
 from pathlib import Path

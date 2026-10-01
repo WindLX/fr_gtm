@@ -1,4 +1,4 @@
-"""Evaluate steady wind, Dryden turbulence, uncertainty, and sensor noise."""
+"""演示稳态风、Dryden 湍流、参数不确定性与传感器噪声。"""
 
 from typing import cast
 

@@ -1,17 +1,16 @@
-# State vector:
-# pos(3) + vel_body(3) + att_quat(4) + omega(3) + act_pos(4) + dryden(8) = 25
+"""GTM 状态、控制、扰动、参数、噪声与输出向量的维度常量。"""
+
 XDIM = 25
-# Control vector: act_cmd(4) = 4
+"""状态向量维数：25=pos(3)+vel_body(3)+att_quat(4)+omega(3)+act_pos(4)+dryden(8)。"""
 UDIM = 4
-# Disturbance vector: dryden_noise(4) = 4
+"""控制向量维数：act_cmd(4)，即 4 个作动器指令。"""
 DDIM = 4
-# Tunable parameter vector: wind(5) + uncertainty(28) = 33
+"""扰动向量维数：dryden_noise(4)，即 4 路 Dryden 白噪声。"""
 PDIM = 33
-# Noise vector: sensor_noise(21) = 21
+"""可调参数向量维数：wind(5) + uncertainty(28)，共 33。"""
 NDIM = 21
-# Output vector: gamma(1) + alpha(1) + beta(1) + V(1) + altitude(1) + euler(3) +
-#                omega(3) + nz(1) + qbar(1) + act_pos(4) + act_cmd(4) = 21
+"""噪声向量维数：sensor_noise(21)，即 21 路标准化传感器噪声。"""
 YDIM = 21
-# Causal feedback prefix: every measured physical quantity through actual
-# actuator position, excluding the four commanded-actuator telemetry channels.
+"""输出向量维数：13 个物理量加 act_pos(4) 与 act_cmd(4)，共 21。"""
 FEEDBACK_YDIM = 17
+"""因果反馈前缀长度：到实际作动器位置为止的 17 个物理量，不含指令遥测。"""

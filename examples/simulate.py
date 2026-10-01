@@ -1,4 +1,4 @@
-"""Run a short nominal simulation and save it with the standard Recorder."""
+"""运行一段标称短仿真并用标准 Recorder 保存结果。"""
 
 from pathlib import Path
 from typing import cast

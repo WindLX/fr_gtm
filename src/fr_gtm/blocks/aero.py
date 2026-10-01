@@ -1,4 +1,4 @@
-"""GTM atmosphere, air-data, and aerodynamic load block."""
+"""GTM 大气、空速与气动载荷 Block。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,14 @@ from ..config import GTMConfig, Mode
 
 
 class AeroResult(NamedTuple):
-    """Coefficient order ``[CX,CY,CZ,Cl,Cm,Cn]`` and resulting FRD loads."""
+    """气动系数与 FRD 载荷结果。
+
+    Attributes:
+        coefficients: 六元气动系数，顺序为 `[CX, CY, CZ, Cl, Cm, Cn]`。
+        force: 机体系气动力，单位 N。
+        moment: 机体系气动力矩，单位 N·m。
+        reynolds: 雷诺数，无量纲。
+    """
 
     coefficients: Signal
     force: Signal
@@ -351,11 +358,30 @@ def aerodynamic_loads(
     c_a_unc: Signal,
     c_r_unc: Signal,
 ) -> AeroResult:
-    """Combine static, control and dynamic coefficients into FRD loads.
+    """把静态、操纵与动导系数合成为 FRD 载荷。
 
-    Force coefficients occupy the first three channels; moment coefficients
-    use reference lengths ``[b, Cbar, b]``. The final ``arm x force`` shifts
-    loads from the aerodynamic reference point to the configured center of mass.
+    Args:
+        cfg: GTM 配置，提供气动表、参考面积/长度与力矩参考点。
+        altitude: 几何高度，单位 m。
+        mach: 马赫数，无量纲。
+        qbar: 动压，单位 Pa。
+        alpha: 迎角，单位 deg。
+        beta: 侧滑角，单位 deg。
+        tas: 真空速，单位 m/s。
+        pqr: 相对气流的机体系角速率，单位 rad/s。
+        actuators: 四个作动器位置 `[elevator, aileron, rudder, throttle]`，
+            角度单位 deg，油门单位 %。
+        c_static_unc: 六个静态系数的相对不确定性增量。
+        c_e_unc: 三个升降舵系数的相对不确定性增量。
+        c_a_unc: 六个副翼系数的相对不确定性增量。
+        c_r_unc: 六个方向舵系数的相对不确定性增量。
+
+    Returns:
+        AeroResult: 六元系数、机体系力（N）、机体系力矩（N·m）与雷诺数。
+
+    Note:
+        力系数占前三个通道，力矩系数使用参考长度 `[b, Cbar, b]`；最后的
+        `arm x force` 把载荷从气动参考点平移到配置的重心。
     """
     c_static, c_e, c_a, c_r = _uncertainty_scales(
         c_static_unc, c_e_unc, c_a_unc, c_r_unc
@@ -380,11 +406,15 @@ def aerodynamic_loads(
 
 @fr.block
 def Aero(cfg: GTMConfig) -> None:
-    """Compute wind-relative air-data and GTM aerodynamic force/moment.
+    """计算相对气流空速与 GTM 气动力/力矩。
 
-    Position/velocity use NED/FRD SI conventions. GTM aerodynamic lookup axes
-    retain degrees, so alpha/beta are converted at this block boundary. Gust
-    angular velocity is subtracted before dynamic-derivative decomposition.
+    Args:
+        cfg: GTM 配置，提供气动表、参考几何、力矩参考点与运行时系数
+            不确定性的顺序。
+
+    Note:
+        位置与速度使用 NED/FRD 国际单位制。GTM 气动查表坐标保留度，因此
+        alpha/beta 在本 Block 边界处换算。动导分解前会先减去突风角速度。
     """
     actuators = fr.input("actuators", (4,), description="Actuator positions")
     position = fr.input("position", (3,), unit="m")

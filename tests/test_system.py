@@ -13,6 +13,7 @@ from fr_gtm import (
     build_ground_initial_state,
     build_initial_state,
 )
+from fr_gtm.blocks import Engine, Mass
 
 
 def _compile(cfg: GTMConfig | None = None) -> fr.CompiledModel[Any]:
@@ -100,7 +101,7 @@ def test_initial_state_and_outputs_are_finite() -> None:
 
 
 def test_command_telemetry_is_excluded_from_feedback() -> None:
-    """Controller feedback must not have direct feedthrough from root command."""
+    """控制器反馈不得对根指令存在直接前馈。"""
 
     model = _compile()
     x = build_initial_state(model)
@@ -238,3 +239,90 @@ def test_ground_touchdown_short_trajectory_is_finite() -> None:
     np.testing.assert_allclose(
         np.linalg.norm(state["Root.eom::quat"]), 1.0, atol=1.0e-10
     )
+
+
+def _mass_block_outputs(cfg: GTMConfig) -> Mapping[str, Any]:
+    """编译只含 `Mass` 块的系统，便于直接读取重量与质量输出。"""
+
+    @fr.system
+    def MassOnly() -> None:
+        mass = Mass(cfg, name="mass")
+        fr.export(mass_value=mass.mass, weight_value=mass.weight)
+
+    builder = cast(fr.PyIrBuilder, MassOnly())
+    model = fr.Compiler(
+        fr.CompilerSpec(backend=fr.backends.numpy, integrator="euler", dt=0.01)
+    ).compile(builder)
+    _, _, y, _ = model.continuous_fn(
+        0.0, model.x.build(), model.xd.build(), model.u.build(), model.p.build()
+    )
+    return model.y.read(y, by="path")
+
+
+def test_mass_block_uses_configured_gravity() -> None:
+    """`Mass` 用 `UncertaintyConfig.gravity_acc` 换算质量，而非硬编码常量。"""
+
+    cfg = GTMConfig.default()
+    baseline = _mass_block_outputs(cfg)
+    np.testing.assert_allclose(
+        baseline["Root::mass_value"], [cfg.aircraft.w0 / cfg.uncertainty.gravity_acc]
+    )
+
+    changed = cfg.model_copy(deep=True)
+    changed.uncertainty.gravity_acc = 2.0 * cfg.uncertainty.gravity_acc
+    updated = _mass_block_outputs(changed)
+    np.testing.assert_allclose(
+        updated["Root::mass_value"], [cfg.aircraft.w0 / changed.uncertainty.gravity_acc]
+    )
+    assert not np.allclose(baseline["Root::mass_value"], updated["Root::mass_value"])
+
+
+def _engine_block_moment(cfg: GTMConfig) -> np.ndarray:
+    """编译只含 `Engine` 块的系统，返回固定工况下的发动机力矩。"""
+
+    @fr.system
+    def EngineOnly() -> None:
+        engine = Engine(cfg, name="engine")
+        actuators = fr.input("actuators", (4,))
+        omega_body = fr.input("omega_body", (3,))
+        pressure_ratio = fr.input("pressure_ratio", (1,))
+        qbar = fr.input("qbar", (1,))
+        actuators >> engine.actuators
+        omega_body >> engine.omega_body
+        pressure_ratio >> engine.pressure_ratio
+        qbar >> engine.qbar
+        fr.export(engine_force=engine.force, engine_moment=engine.moment)
+
+    builder = cast(fr.PyIrBuilder, EngineOnly())
+    model = fr.Compiler(
+        fr.CompilerSpec(backend=fr.backends.numpy, integrator="euler", dt=0.01)
+    ).compile(builder)
+    u = model.u.build(
+        {
+            "Root::actuators": np.array([0.0, 0.0, 0.0, 60.0]),
+            "Root::omega_body": np.zeros(3),
+            "Root::pressure_ratio": np.ones(1),
+            "Root::qbar": np.array([1000.0]),
+        }
+    )
+    _, _, y, _ = model.continuous_fn(
+        0.0, model.x.build(), model.xd.build(), u, model.p.build()
+    )
+    return np.asarray(model.y.read(y, by="path")["Root::engine_moment"])
+
+
+def test_engine_block_uses_engine_config_cg_pos() -> None:
+    """`Engine` 的力臂取自 `EngineConfig.cg_pos`，使该字段真正参与仿真。"""
+
+    cfg = GTMConfig.default()
+    assert cfg.engine.cg_pos == cfg.aircraft.cg_pos0
+
+    shifted = cfg.model_copy(deep=True)
+    shifted.engine.cg_pos = [
+        cfg.aircraft.cg_pos0[0] + 0.5,
+        cfg.aircraft.cg_pos0[1],
+        cfg.aircraft.cg_pos0[2],
+    ]
+    baseline = _engine_block_moment(cfg)
+    moved = _engine_block_moment(shifted)
+    assert not np.allclose(baseline, moved)

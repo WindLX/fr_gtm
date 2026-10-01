@@ -1,8 +1,10 @@
-"""Generate frozen numerical reference cases from the external ``gtm_ad``.
+"""从外部 `gtm_ad` 生成冻结的数值参考用例。
 
-Example:
-    uv run --with /path/to/gtm_ad python scripts/generate_reference.py \
+Examples:
+    ```bash
+    uv run --with /path/to/gtm_ad python scripts/generate_reference.py \\
         --gtm-ad /path/to/gtm_ad
+    ```
 """
 
 from __future__ import annotations

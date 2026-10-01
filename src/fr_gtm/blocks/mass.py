@@ -1,19 +1,22 @@
-"""GTM mass and inertia uncertainty block."""
+"""GTM 质量与转动惯量不确定性 Block。"""
 
 import fly_ruler_core as fr
 
 from ..config import GTMConfig
 
-_GRAVITY = 9.80665
-
 
 @fr.block
 def Mass(cfg: GTMConfig) -> None:
-    """Apply relative uncertainty to weight and the six inertia products.
+    """对重量与六个惯量分量施加相对不确定性。
 
-    ``inertia_unc`` follows ``[Ixx, Iyy, Izz, Ixz, Iyz, Ixy]`` from gtm_ad.
-    Products enter the FRD tensor with the source convention's negative
-    off-diagonal signs. Zero perturbation reproduces nominal reference data.
+    Args:
+        cfg: GTM 配置，提供标称重量、`[Ixx, Iyy, Izz, Ixz, Iyz, Ixy]` 标称惯量与
+            重力加速度。
+
+    Note:
+        `inertia_unc` 的顺序为 `[Ixx, Iyy, Izz, Ixz, Iyz, Ixy]`，与 gtm_ad
+        一致；惯性积按源模型的负号约定进入 FRD 惯量张量。零扰动复现标称
+        参考数据，逆惯量用闭式解计算以避免后端特有的矩阵求逆操作。
     """
     weight_unc = fr.param(
         "weight_unc", (1,), default=[0.0], description="Relative weight uncertainty"
@@ -27,7 +30,7 @@ def Mass(cfg: GTMConfig) -> None:
 
     nominal = cfg.aircraft.inertia0
     weight = cfg.aircraft.w0 * (1.0 + weight_unc[0])
-    mass = weight / _GRAVITY
+    mass = weight / cfg.uncertainty.gravity_acc
     ixx = nominal[0] * (1.0 + inertia_unc[0])
     iyy = nominal[1] * (1.0 + inertia_unc[1])
     izz = nominal[2] * (1.0 + inertia_unc[2])

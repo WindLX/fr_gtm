@@ -1,8 +1,9 @@
-"""Measure generated GTM source size and the stages of JAX compilation.
+"""度量生成的 GTM 源码规模与 JAX 编译各阶段耗时。
 
-This is an explicit developer benchmark rather than a normal example or CI
-test. Results depend on the local JAX/XLA version and machine, so the JSON is
-written below ``build/`` and is never treated as frozen reference data.
+Note:
+    这是显式的开发者基准，而不是常规示例或 CI 测试。结果依赖本机的
+    JAX/XLA 版本与硬件，因此 JSON 只写入 `build/` 下，永不作为冻结的
+    参考数据。
 """
 
 from __future__ import annotations

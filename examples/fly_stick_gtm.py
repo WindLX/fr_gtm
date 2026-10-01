@@ -1,19 +1,26 @@
-"""Fly the GTM interactively with fly_stick and stream it to fly_ruler_proto.
+"""用 fly_stick 交互驾驶 GTM，并把状态流推送到 fly_ruler_proto。
 
-This example intentionally keeps fly_stick and fly_ruler_proto_python optional.
-For a real joystick + server run:
+本示例有意把 fly_stick 与 fly_ruler_proto_python 保持为可选依赖。
 
-    uv sync --group fly-stick
-    uv run --group fly-stick python examples/fly_stick_gtm.py
+Note:
+    默认运行时后端是 native：先用 CasADi 后端编译模型，再通过
+    `fly_ruler_core.codegen` 下沉为带缓存的 C++/pybind11 扩展。首次运行
+    需要编译，之后的运行复用缓存。
 
-For a dependency-free smoke test:
+Examples:
+    真实摇杆加服务端（`just setup-stick` 用 `--with-editable` 引入
+    `fly_stick` 与 `fly_ruler_proto_python` 两个可选依赖）：
 
+    ```bash
+    just setup-stick
+    just example-fly-stick
+    ```
+
+    免依赖冒烟测试：
+
+    ```bash
     uv run python examples/fly_stick_gtm.py --dry-run --no-stick --no-proto
-
-The default runtime backend is native: the model is first compiled with the
-CasADi backend, then lowered to a cached C++/pybind11 extension via
-fly_ruler_core.codegen.  The first run may spend some time compiling; later runs
-reuse the cache.
+    ```
 """
 
 from __future__ import annotations
@@ -26,7 +33,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import fly_ruler_core as fr
 import numpy as np
@@ -91,7 +98,17 @@ def map_stick_to_command(
     nominal_throttle: float,
     axis_deadband: float,
 ) -> np.ndarray:
-    """Map normalized stick axes to GTM [elevator, aileron, rudder, throttle]."""
+    """把归一化摇杆轴映射为 GTM 的根控制指令。
+
+    各轴先减去死区，再乘以对应舵面的可用行程与 `control_scale`；油门轴由
+    `[-1, 1]` 线性映射到 `[0, 100]` 百分比，未接油门时保持
+    `nominal_throttle`。
+
+    Returns:
+        np.ndarray: 形状 `(4,)` 的指令向量
+            `[elevator_deg, aileron_deg, rudder_deg, throttle_percent]`，
+            已按 `cfg.actuator.position_lower`/`position_upper` 限幅。
+    """
 
     lower = cfg.actuator.position_lower
     upper = cfg.actuator.position_upper
@@ -128,7 +145,12 @@ def map_stick_to_command(
 
 
 def build_input(model: fr.CompiledModel[Any], command: np.ndarray) -> np.ndarray:
-    """Build the GTM root input vector."""
+    """构造 GTM 根输入向量。
+
+    Returns:
+        np.ndarray: 由 `u(4,)` 控制指令、零 `d(4,)` 干扰与零 `n(21,)` 噪声
+            拼接而成的 29 元素平铺输入。
+    """
 
     return np.asarray(
         model.u.build(
@@ -149,7 +171,13 @@ def build_stick_initial_state(
     speed_mps: float,
     command: np.ndarray,
 ) -> np.ndarray:
-    """Build a conservative initial flight state for interactive GTM control."""
+    """构造用于交互式 GTM 控制的保守初始飞行状态。
+
+    Returns:
+        np.ndarray: 25 元素状态向量：高度为 `altitude_m`（NED 下为
+            `-altitude_m`），机体系速度为 `[speed_mps, 0, 0]`，姿态为单位
+            四元数，作动器位置取 `command`，各 Dryden 状态为零。
+    """
 
     return np.asarray(
         model.x.build(
@@ -221,7 +249,12 @@ def build_proto_state(
     origin_lat_deg: float,
     origin_lon_deg: float,
 ) -> Any:
-    """Convert GTM outputs into a fly_ruler_proto aircraft state."""
+    """把 GTM 输出转换为 fly_ruler_proto 飞机状态。
+
+    Returns:
+        Any: 由 `proto.create_aircraft_state` 构造的飞机状态对象，角度已由
+            GTM 的 deg 转换为 proto 期望的 rad。
+    """
 
     pos_ned = np.asarray(output["Root::pos_ned"], dtype=float).reshape(3)
     vel_body = np.asarray(output["Root::vel_body"], dtype=float).reshape(3)
@@ -369,7 +402,7 @@ class Options:
 async def _open_stick(args: Options) -> tuple[Any | None, Any | None]:
     if args.no_stick:
         return None, None
-    fly_stick = _optional_import("fly_stick", "uv sync --group fly-stick")
+    fly_stick = _optional_import("fly_stick", "just setup-stick")
     desc = fly_stick.DeviceDescription.from_toml(str(args.profile))
     pool = fly_stick.PyDevicePool(
         device_descs={args.logical_name: desc},
@@ -427,7 +460,7 @@ async def main_async(args: Options) -> int:
     proto = None
     client = None
     if not args.no_proto:
-        proto = _optional_import("fly_ruler_proto_python", "uv sync --group fly-stick")
+        proto = _optional_import("fly_ruler_proto_python", "just setup-stick")
         initial_state = build_proto_state(
             proto,
             output,
@@ -600,7 +633,7 @@ def main(
     no_proto: Annotated[bool, typer.Option("--no-proto")] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
 ) -> int:
-    """Run the GTM realtime stick simulation."""
+    """运行 GTM 实时摇杆仿真。"""
     return asyncio.run(
         main_async(
             Options(

@@ -1,10 +1,9 @@
-"""Partial trim and linearize GTM using complete variable paths.
+"""用完整变量路径对 GTM 做部分配平与线性化。
 
-The trim solve below fixes one open-loop rigid-body operating point, then lets
-the actuator and Dryden internal states settle so their state derivatives are
-zero. This keeps the example deterministic and fast while still exercising the
-same full-path TrimSolver and LinearizationSolver APIs used for larger flight
-condition trim studies.
+下方的配平求解固定一个开环刚体工作点，再让作动器与 Dryden 内部状态收敛，
+使其状态导数为零。这样既保持示例确定且快速，又仍会走完整的
+`TrimSolver`/`LinearizationSolver` 路径，与更大飞行条件的配平研究所用 API
+一致。
 """
 
 import fly_ruler_core as fr

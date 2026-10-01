@@ -1,4 +1,4 @@
-"""Causal GTM physical feedback with externally driven sensor errors."""
+"""由外部噪声驱动的 GTM 因果物理反馈。"""
 
 import fly_ruler_core as fr
 
@@ -10,16 +10,16 @@ _DEFAULT_CONFIG = SensorConfig()
 
 @fr.block
 def Sensor(cfg: SensorConfig = _DEFAULT_CONFIG) -> None:
-    """Assemble the 17 physical feedback channels and apply sensor errors.
+    """组装 17 个物理反馈通道并施加传感器误差。
 
-    The historical GTM observation appends four actuator-command telemetry
-    values. Those values are intentionally assembled in :mod:`fr_gtm.system`,
-    outside this block. Keeping a command input out of the physical sensor is
-    what makes ``feedback_y`` a causal signal suitable for an internally
-    connected controller.
+    Args:
+        cfg: 各传感器通道的偏置、比例与白噪声标准差，顺序与反馈向量一致。
 
-    Aerodynamic angles, Euler attitude and body rates are exported in degrees
-    to preserve the frozen gtm_ad layout; the dynamics themselves use radians.
+    Note:
+        历史 GTM 观测会在末尾追加四个作动器指令遥测值，这些值由 `fr_gtm.system`
+        在本 Block 之外拼接。把指令输入排除在物理传感器之外，才使
+        `feedback_y` 成为适合内部闭环控制的因果信号。气动角、欧拉姿态与
+        机体角速率按冻结的 gtm_ad 布局以度输出，而动力学内部使用弧度。
     """
 
     gamma = fr.input("gamma", (1,), unit="deg", description="Flight path angle")

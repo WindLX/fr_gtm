@@ -94,6 +94,8 @@ example-backends:
     uv run python examples/backend_compare.py
 
 # Measure generated JAX graph size and local trace/lower/compile latency.
+# 依赖可选 `jax` extra（`uv run --extra jax`），只测编译规模与延迟、不校验
+# 数值正确性，因此不纳入 `just test-examples`；需要时显式运行本配方。
 benchmark-jax-compile:
     JAX_PLATFORMS=cpu XLA_PYTHON_CLIENT_PREALLOCATE=false JAX_ENABLE_X64=true uv run --extra jax python examples/benchmark_jax_compile.py
 

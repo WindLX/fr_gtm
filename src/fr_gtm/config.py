@@ -1,9 +1,7 @@
-"""Configuration objects for the FlyRuler GTM model.
+"""FlyRuler GTM 模型的配置对象。
 
-The source ``gtm_ad`` package builds one large runtime configuration object.
-This module keeps the same default parameter derivation, but exposes the data
-as FlyRuler ``BaseModel`` objects so each subsystem can receive only the
-configuration it owns.
+源 `gtm_ad` 包构建一个大型运行时配置对象；本模块保留相同的默认参数推导，
+但把数据暴露为 FlyRuler `BaseModel`，使每个子系统只接收自己拥有的配置。
 """
 
 from __future__ import annotations
@@ -25,7 +23,14 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class Mode(str, Enum):
-    """GTM flap and landing-gear aerodynamic configuration."""
+    """GTM 襟翼与起落架气动构型。
+
+    Attributes:
+        NORMAL: 光洁构型，无襟翼、起落架收起。
+        HALF_FLAP_GEAR_UP: 半襟翼、起落架收起。
+        FULL_FLAP_GEAR_UP: 全襟翼、起落架收起。
+        FULL_FLAP_GEAR_DOWN: 全襟翼、起落架放下。
+    """
 
     NORMAL = "normal"
     HALF_FLAP_GEAR_UP = "0.5_flap_gear_up"
@@ -34,10 +39,21 @@ class Mode(str, Enum):
 
 
 class UncertaintyConfig(BaseModel):
-    """Nominal full/scale mass properties used by runtime perturbations.
+    """运行时摄动使用的标称全尺寸/缩比质量特性。
 
-    Products of inertia retain the source-model sign convention. The Mass block
-    converts this six-element representation into a symmetric FRD tensor.
+    Attributes:
+        w0: 标称重量，单位 N，必须为正。
+        Ixx0: 绕机体 x 轴的标称转动惯量，单位 kg·m²，必须为正。
+        Iyy0: 绕机体 y 轴的标称转动惯量，单位 kg·m²，必须为正。
+        Izz0: 绕机体 z 轴的标称转动惯量，单位 kg·m²，必须为正。
+        Ixz0: 惯性积 Ixz，单位 kg·m²。
+        Iyz0: 惯性积 Iyz，单位 kg·m²。
+        Ixy0: 惯性积 Ixy，单位 kg·m²。
+        gravity_acc: 重力加速度，单位 m/s²，必须为正。
+
+    Note:
+        惯性积保留源模型的符号约定；Mass Block 会把这份六元表示转换为对称的
+        FRD 惯量张量。
     """
 
     w0: float = Field(default=Force.lbf_to_n(185_000.0), gt=0.0)  # Weight [N].
@@ -51,7 +67,25 @@ class UncertaintyConfig(BaseModel):
 
 
 class EngineConfig(BaseModel):
-    """GTM twin-engine thrust and gyroscopic moment configuration."""
+    """GTM 双发推力与陀螺力矩配置。
+
+    Attributes:
+        T_gain: 推力增益，把模型推力换算为 N。
+        h_gain: 角动量增益，单位 (kg·m²)/(slug·ft²)。
+        RPMref_gain: 参考 RPM 缩放增益。
+        ram_drag_coeff: 冲压阻力系数。
+        S: 冲压阻力使用的参考机翼面积，单位 m²。
+        shaft_diameter: 转轴直径，单位 ft，沿用源模型。
+        shaft_length: 转轴长度，单位 ft，沿用源模型。
+        density: 转轴材料密度，单位 slug/ft³。
+        thrust_coefficients: 由参考 RPM 计算推力的多项式系数，最高次在前。
+        throttle_coefficients: 由油门计算参考 RPM 的多项式系数，最高次在前。
+        engl_pos: 左发安装位置，单位 m，机体三元素。
+        engr_pos: 右发安装位置，单位 m，机体三元素。
+        engl_ang: 左发 `[roll, pitch, yaw]` 安装角，单位 deg。
+        engr_ang: 右发 `[roll, pitch, yaw]` 安装角，单位 deg。
+        cg_pos: 重心相对机头位置，单位 m，机体三元素。
+    """
 
     T_gain: float = 1.0  # Thrust gain converting model thrust to Newtons.
     h_gain: float = 1.0  # Angular momentum gain (kg*m^2)/(slug*ft^2).
@@ -82,6 +116,18 @@ class EngineConfig(BaseModel):
     )
     @classmethod
     def validate_vector3(cls, value: list[float]) -> list[float]:
+        """校验发动机安装位置、安装角与重心向量都是 3 个有限值。
+
+        Args:
+            value: 待校验的机体三元素向量。
+
+        Returns:
+            通过校验的原向量。
+
+        Raises:
+            ValueError: 长度不为 3，或存在非有限值。
+        """
+
         if len(value) != 3 or not np.all(np.isfinite(value)):
             raise ValueError(
                 "engine position/alignment vectors must contain 3 finite values"
@@ -91,6 +137,18 @@ class EngineConfig(BaseModel):
     @field_validator("thrust_coefficients", "throttle_coefficients")
     @classmethod
     def validate_polynomial(cls, value: list[float]) -> list[float]:
+        """校验推力与参考转速多项式都是 4 个有限系数（最高次在前）。
+
+        Args:
+            value: 待校验的多项式系数列表。
+
+        Returns:
+            通过校验的原系数列表。
+
+        Raises:
+            ValueError: 长度不为 4，或存在非有限值。
+        """
+
         if len(value) != 4 or not np.all(np.isfinite(value)):
             raise ValueError(
                 "engine polynomial coefficients must contain 4 finite values"
@@ -99,7 +157,16 @@ class EngineConfig(BaseModel):
 
 
 class SensorSingleConfig(BaseModel):
-    """Bias, scale, and white-noise standard deviation for one sensor channel."""
+    """单个传感器通道的偏置、比例与白噪声标准差。
+
+    Attributes:
+        bias: 加性偏置，单位与对应物理量一致。
+        scale: 乘性比例系数。
+        noise_std: 白噪声标准差，单位与对应物理量一致，必须非负。
+
+    Note:
+        `bias`、`scale` 与 `noise_std` 都必须是有限值。
+    """
 
     bias: float = 0.0
     scale: float = 1.0
@@ -107,13 +174,45 @@ class SensorSingleConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_finite(self) -> "SensorSingleConfig":
+        """校验偏置、比例与噪声标准差三个字段都是有限值。
+
+        Returns:
+            通过校验的自身实例。
+
+        Raises:
+            ValueError: 任一字段不是有限值。
+        """
+
         if not np.isfinite([self.bias, self.scale, self.noise_std]).all():
             raise ValueError("sensor bias, scale and noise_std must be finite")
         return self
 
 
 class SensorConfig(BaseModel):
-    """GTM sensor error configuration for the sensor output vector."""
+    """传感器输出向量的 GTM 传感器误差配置。
+
+    Attributes:
+        gamma: 航迹角通道误差，单位 deg。
+        alpha: 迎角通道误差，单位 deg。
+        beta: 侧滑角通道误差，单位 deg。
+        V: 真空速通道误差，单位 m/s。
+        altitude: 高度通道误差，单位 m。
+        phi: 滚转角通道误差，单位 deg。
+        theta: 俯仰角通道误差，单位 deg。
+        psi: 偏航角通道误差，单位 deg。
+        p: 滚转角速率通道误差，单位 deg/s。
+        q: 俯仰角速率通道误差，单位 deg/s。
+        r: 偏航角速率通道误差，单位 deg/s。
+        nz: 法向过载通道误差，无量纲。
+        qbar: 动压通道误差，单位 Pa。
+        elevator: 升降舵位置通道误差，单位 deg。
+        aileron: 副翼位置通道误差，单位 deg。
+        rudder: 方向舵位置通道误差，单位 deg。
+
+    Note:
+        各通道误差按 `bias + scale * clean + noise * noise_std` 施加，其中
+        `noise` 是外部输入的标准化噪声。
+    """
 
     gamma: SensorSingleConfig = Field(
         default_factory=lambda: SensorSingleConfig(noise_std=0.125)
@@ -168,11 +267,18 @@ class SensorConfig(BaseModel):
 
 
 class ReynoldsConfig(BaseModel):
-    """Reynolds lookup with source altitude in feet and dimensionless Mach.
+    """以英尺高度与无量纲马赫数为坐标的雷诺数查表配置。
 
-    The stored MATLAB table is flattened in Fortran order by the aerodynamic
-    block before interpolation; changing that orientation changes all tables
-    that use Reynolds as an axis.
+    Attributes:
+        altitude_ft: 高度断点，单位 ft。
+        mach_bp: 马赫数断点，无量纲。
+        reynolds_values: 雷诺数表值。
+
+    Note:
+        气动 Block 在插值前把存储的 MATLAB 表按 Fortran 序展平为
+        `(len(altitude_ft), len(mach_bp))`；改变该方向会影响所有以雷诺数为轴
+        的表格。这些字段是气动表缓存（`exclude=True`），不会写入 Pydantic
+        序列化结果。
     """
 
     altitude_ft: Any = Field(default=None, exclude=True)  # Altitude breakpoints (ft).
@@ -181,10 +287,21 @@ class ReynoldsConfig(BaseModel):
 
 
 class BasicAirframeConfig(BaseModel):
-    """Baseline force/moment coefficient tables.
+    """基线气动力/力矩系数表。
 
-    C2 data returns ``[CX, CZ]`` over alpha/beta/Reynolds. C4 returns
-    ``[CY, Cl, Cm, Cn]`` over alpha/beta. Angles are source-table degrees.
+    Attributes:
+        alpha_c2: C2 数据的迎角断点，单位 deg。
+        beta_c2: C2 数据的侧滑角断点，单位 deg。
+        reynolds_c2: C2 数据的雷诺数断点，无量纲。
+        data_cx_cz: `[CX, CZ]` 表，轴为 alpha/beta/Reynolds。
+        alpha_c4: C4 数据的迎角断点，单位 deg。
+        beta_c4: C4 数据的侧滑角断点，单位 deg。
+        data_cy_cl_cm_cn: `[CY, Cl, Cm, Cn]` 表，轴为 alpha/beta。
+
+    Note:
+        C2 数据在 alpha/beta/Reynolds 上返回 `[CX, CZ]`，C4 数据在
+        alpha/beta 上返回 `[CY, Cl, Cm, Cn]`；角度均为源表度数。这些字段是
+        气动表缓存（`exclude=True`），不会写入 Pydantic 序列化结果。
     """
 
     alpha_c2: Any = Field(default=None, exclude=True)  # C2 alpha breakpoints (deg).
@@ -197,10 +314,32 @@ class BasicAirframeConfig(BaseModel):
 
 
 class ControlSurfacesConfig(BaseModel):
-    """Elevator/aileron/rudder increments and spanwise moment arms.
+    """升降舵/副翼/方向舵增量表与展向力臂。
 
-    Each table retains gtm_ad axis order and degree-valued actuator breakpoints.
-    The four arm values shift local surface forces into roll/yaw moments.
+    Attributes:
+        alpha_ele: 升降舵表迎角断点，单位 deg。
+        beta_ele: 升降舵表侧滑角断点，单位 deg。
+        stab_ele: 升降舵表平尾偏角断点，单位 deg。
+        elev_bp: 升降舵偏度断点，单位 deg。
+        data_ele: 升降舵增量表。
+        alpha_ail: 副翼表迎角断点，单位 deg。
+        beta_ail: 副翼表侧滑角断点，单位 deg。
+        ail_bp: 副翼偏度断点，单位 deg。
+        data_ail: 副翼增量表。
+        alpha_rud: 方向舵表迎角断点，单位 deg。
+        beta_rud: 方向舵表侧滑角断点，单位 deg。
+        rud_bp: 方向舵偏度断点，单位 deg。
+        data_rud: 方向舵增量表。
+        mode: 襟翼/起落架气动构型名，取 `Mode` 的取值。
+        arm_left_out: 左外副翼力臂，单位 m。
+        arm_left_in: 左内副翼力臂，单位 m。
+        arm_right_in: 右内副翼力臂，单位 m。
+        arm_right_out: 右外副翼力臂，单位 m。
+
+    Note:
+        每张表保留 gtm_ad 的轴顺序与以度为单位的作动器断点；四个力臂把当地
+        舵面力折算成滚转/偏航力矩。表字段是气动表缓存（`exclude=True`），
+        不会写入 Pydantic 序列化结果。
     """
 
     alpha_ele: Any = Field(default=None, exclude=True)
@@ -224,10 +363,29 @@ class ControlSurfacesConfig(BaseModel):
 
 
 class DynamicDerivativesConfig(BaseModel):
-    """Kalviste rate-decomposition tables and reference lengths.
+    """Kalviste 角速率分解表与参考长度。
 
-    Normalized ``p/q/r`` contributions use wing span ``b`` or mean chord
-    ``Cbar``. The w-axis table carries coupled alpha/beta/rate coefficients.
+    Attributes:
+        b: 翼展，单位 m，用于归一化 p/r。
+        Cbar: 平均气动弦长，单位 m，用于归一化 q。
+        alpha_p: p 表迎角断点，单位 deg。
+        phat_bp: 归一化滚转角速率断点。
+        data_p: p 导数表。
+        alpha_q: q 表迎角断点，单位 deg。
+        qhat_bp: 归一化俯仰角速率断点。
+        data_q: q 导数表。
+        alpha_r: r 表迎角断点，单位 deg。
+        rhat_bp: 归一化偏航角速率断点。
+        data_r: r 导数表。
+        alpha_w: w 表迎角断点，单位 deg。
+        what_bp: 归一化 w 断点。
+        beta_w: w 表侧滑角断点，单位 deg。
+        data_w: w 轴耦合表。
+
+    Note:
+        归一化的 `p/q/r` 贡献分别用翼展 `b` 或平均弦长 `Cbar`；w 轴表带有
+        迎角/侧滑角/角速率的耦合系数。表字段是气动表缓存（`exclude=True`），
+        不会写入 Pydantic 序列化结果。
     """
 
     b: float = 6.0  # Wing span (m).
@@ -248,7 +406,16 @@ class DynamicDerivativesConfig(BaseModel):
 
 
 class AeroForceMomentConfig(BaseModel):
-    """Reference area/lengths and aerodynamic-center offset in SI units."""
+    """国际单位制下的参考面积与长度及气动中心偏置。
+
+    Attributes:
+        Sref: 参考机翼面积，单位 m²。
+        b: 翼展，单位 m。
+        Cbar: 平均气动弦长，单位 m。
+        arm_x: 压心相对重心的偏置 x，单位 m。
+        arm_y: 压心相对重心的偏置 y，单位 m。
+        arm_z: 压心相对重心的偏置 z，单位 m。
+    """
 
     Sref: float = 1.0  # Reference wing area (m^2).
     b: float = 1.0  # Wing span (m).
@@ -259,10 +426,26 @@ class AeroForceMomentConfig(BaseModel):
 
 
 class AircraftConfig(BaseModel):
-    """Nominal aircraft geometry and mass properties.
+    """标称飞机几何与质量特性。
 
-    Values are SI unless a field name states otherwise. Defaults are generated
-    from the ``gtm_ad`` scale-model data and full-scale scaling rules.
+    Attributes:
+        w0: 标称飞机重量，单位 N。
+        inertia0: `[Ixx, Iyy, Izz, Ixz, Iyz, Ixy]`，单位 kg·m²。
+        S: 参考机翼面积，单位 m²。
+        Cbar: 平均气动弦长，单位 m。
+        b: 翼展，单位 m。
+        le_mac: 平均气动弦前缘到机头的距离，单位 m。
+        cg_pos0: 重心相对机头位置，单位 m，机体三元素。
+        ref_cg: 气动参考重心相对机头位置，单位 m，机体三元素。
+        engl_pos: 左发安装位置，单位 m，机体三元素。
+        engr_pos: 右发安装位置，单位 m，机体三元素。
+        engl_ang: 左发 `[roll, pitch, yaw]` 安装角，单位 deg。
+        engr_ang: 右发 `[roll, pitch, yaw]` 安装角，单位 deg。
+
+    Note:
+        除字段名特别说明外均为 SI 单位。默认值由 `gtm_ad` 缩比模型数据与
+        全尺寸缩放规则生成。重量与参考几何必须为正，`inertia0` 必须给出
+        正定的惯量张量，各三元素向量必须是有限值。
     """
 
     w0: float = Force.lbf_to_n(185_000.0)  # Nominal aircraft weight (N).
@@ -301,6 +484,20 @@ class AircraftConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_geometry_and_inertia(self) -> "AircraftConfig":
+        """校验重量与参考几何为正、惯量张量正定。
+
+        `w0`、`S`、`Cbar`、`b` 必须为正；`inertia0` 必须是 6 个有限值且按源
+        模型符号约定展开的惯量张量正定；`cg_pos0`、`ref_cg` 与四个发动机
+        位置/安装角向量必须为空或 3 个有限值。
+
+        Returns:
+            通过校验的自身实例。
+
+        Raises:
+            ValueError: 重量或参考几何非正、惯量向量非法或张量非正定，
+                或几何向量长度不是 3、含非有限值。
+        """
+
         if self.w0 <= 0.0 or self.S <= 0.0 or self.Cbar <= 0.0 or self.b <= 0.0:
             raise ValueError("aircraft weight and reference geometry must be positive")
         inertia = np.asarray(self.inertia0, dtype=float)
@@ -329,10 +526,17 @@ class AircraftConfig(BaseModel):
 
 
 class WindConfig(BaseModel):
-    """Compile-time wind-shear and Dryden calibration values.
+    """编译期风切变与 Dryden 标定值。
 
-    Mean wind speed, direction and turbulence level remain runtime parameters;
-    direction uses radians throughout the public model.
+    Attributes:
+        runway_altitude: 风切变使用的跑道高度，单位 m。
+        wind_speed_low: 低空风强度，单位 m/s，必须为正。
+        scale_length_high: 高空尺度长度，单位 m，必须为正。
+        noise_sample_time: 噪声采样时间，单位 s，必须为正。
+
+    Note:
+        平均风速、风向与湍流强度仍是运行时参数；风向在公开模型中统一使用
+        弧度。
     """
 
     runway_altitude: float = 0.0  # Runway altitude used by wind shear (m).
@@ -342,7 +546,19 @@ class WindConfig(BaseModel):
 
 
 class ActuatorConfig(BaseModel):
-    """Actuator dynamics limits for [elevator, aileron L/R, rudder/throttle]."""
+    """`[升降舵, 副翼左右, 方向舵/油门]` 的作动器动力学限幅。
+
+    Attributes:
+        gain: 一阶作动器增益，四元素。
+        rate_limit: 速率上限，角度通道为 deg/s、油门通道为 %/s，四元素且
+            必须为正。
+        position_lower: 位置下限 `[deg, deg, deg, %]`，四元素。
+        position_upper: 位置上限 `[deg, deg, deg, %]`，四元素。
+
+    Note:
+        四个向量的排列均为 `[elevator, aileron, rudder, throttle]`；位置下限
+        必须严格小于上限。
+    """
 
     gain: list[float] = Field(default_factory=list)  # First-order actuator gains.
     rate_limit: list[float] = Field(default_factory=list)  # Rate limits (deg/s or %/s).
@@ -355,6 +571,16 @@ class ActuatorConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_channels(self) -> "ActuatorConfig":
+        """校验四个作动器通道向量同长、有限，且限幅关系自洽。
+
+        Returns:
+            通过校验的自身实例。
+
+        Raises:
+            ValueError: 非空向量长度不为 4 或含非有限值、位置下限不低于
+                上限，或速率上限非正。
+        """
+
         vectors = [self.gain, self.rate_limit, self.position_lower, self.position_upper]
         for value in vectors:
             if value and (len(value) != 4 or not np.all(np.isfinite(value))):
@@ -373,11 +599,20 @@ class ActuatorConfig(BaseModel):
 
 
 class AeroConfig(BaseModel):
-    """All GTM aerodynamic tables and force/moment geometry.
+    """全部 GTM 气动表与力/力矩几何。
 
-    Arrays are loaded from the packaged ``aero_tables.npz`` resource and kept
-    out of Pydantic serialization so system JSON contains resource references,
-    not duplicated table payloads.
+    Attributes:
+        data_path: 可选的 `aero_tables.npz` 路径或其所在目录；为 `None` 时
+            使用包内资源。
+        reynolds: 雷诺数查表配置。
+        basic_airframe: 基线气动力/力矩系数表。
+        control_surfaces: 舵面增量表与展向力臂。
+        dynamic_derivatives: Kalviste 动导表与参考长度。
+        force_moment: 参考面积/长度与气动中心偏置。
+
+    Note:
+        数组从打包的 `aero_tables.npz` 资源加载，并保存在各表配置的
+        `exclude=True` 字段中，因此系统 JSON 只含资源引用，不重复表数据。
     """
 
     # Optional aero_tables.npz path or containing directory.
@@ -394,11 +629,25 @@ class AeroConfig(BaseModel):
 
 
 class GTMConfig(BaseModel):
-    """Top-level configuration derived consistently for scale/mode choices.
+    """按缩比/构型选择一致派生的顶层 GTM 配置。
 
-    Call :meth:`default` rather than independently constructing nested configs
-    when switching full-scale/scale model or flap/gear mode; geometry, engine,
-    actuators, sensors and aerodynamic resources are coupled by that choice.
+    Attributes:
+        is_fullscale: 是否使用全尺寸飞机参数。
+        mode: 襟翼与起落架气动构型。
+        aircraft: 标称几何与质量特性。
+        wind: 风切变与 Dryden 标定值。
+        ground: 跑道接触子系统配置。
+        uncertainty: 质量与惯量不确定性标称值。
+        engine: 双发推力与陀螺力矩配置。
+        actuator: 作动器动力学限幅。
+        aero: 气动表与力/力矩几何。
+        sensor: 传感器误差配置。
+
+    Note:
+        切换全尺寸/缩比模型或襟翼/起落架构型时，应调用 `default` 而不是独立
+        构造嵌套配置；几何、发动机、作动器、传感器与气动资源都由该选择耦合
+        决定。`is_fullscale` 与 `mode` 属于编译期配置，运行时参数 `p` 无法
+        覆盖它们。
     """
 
     is_fullscale: bool = True
@@ -435,13 +684,24 @@ class GTMConfig(BaseModel):
         data_path: str | Path | None = None,
         enable_ground: bool = False,
     ) -> "GTMConfig":
-        """Create the derived default GTM configuration.
+        """创建按选择一致派生的默认 GTM 配置。
 
         Args:
-            is_fullscale: Use full-scale aircraft parameters when true.
-            mode: Flap and landing-gear aerodynamic mode.
-            data_path: Optional ``aero_tables.npz`` path or containing directory.
-            enable_ground: Instantiate the fixed-wing runway-contact subsystem.
+            is_fullscale: 为 `True` 时使用全尺寸飞机参数，否则使用缩比模型参数。
+            mode: 襟翼与起落架气动构型。
+            data_path: 可选的 `aero_tables.npz` 路径或其所在目录。
+            enable_ground: 是否实例化固定翼跑道接触子系统。
+
+        Returns:
+            GTMConfig: 几何、发动机、作动器、传感器与气动表已按 `is_fullscale`
+                和 `mode` 一致派生的配置对象。
+
+        Examples:
+            ```python
+            from fr_gtm import GTMConfig, Mode
+
+            cfg = GTMConfig.default(is_fullscale=True, mode=Mode.NORMAL)
+            ```
         """
         mode_value = _parse_mode(mode)
         aircraft = _build_aircraft_config(is_fullscale)
@@ -464,7 +724,23 @@ class GTMConfig(BaseModel):
 
     @classmethod
     def from_toml(cls, path: str | Path) -> "GTMConfig":
-        """Load a TOML file as default GTM config plus sparse overrides."""
+        """从 TOML 文件加载默认 GTM 配置并叠加稀疏覆盖。
+
+        Args:
+            path: TOML 文件路径。
+
+        Returns:
+            GTMConfig: 以 `default` 为基线，叠加文件中 `aircraft`、`wind`、
+                `ground`、`uncertainty`、`engine`、`actuator`、`aero`、`sensor`
+                小节后的配置。
+
+        Raises:
+            ValueError: 文件仍包含已移除的 `trim_model_type` 键时抛出。
+
+        Note:
+            `aero.data_path` 的相对路径按 TOML 文件所在目录解析；修改
+            `aircraft` 小节会重新派生发动机、不确定性与气动表配置。
+        """
         config_path = Path(path)
         raw = rtoml.loads(config_path.read_text(encoding="utf-8"))
         gtm_raw = dict(raw.get("gtm", {}))
@@ -597,7 +873,7 @@ def _build_ground_config(
     *,
     enabled: bool = False,
 ) -> GroundContactConfig:
-    """Derive FRD/SI wheel data from the public NASA GTM T2 parameters."""
+    """由公开的 NASA GTM T2 参数推导 FRD/SI 起落架数据。"""
 
     length_ratio = _scale_factor(is_fullscale)
     weight_ratio = aircraft.w0 / Force.lbf_to_n(57.75)

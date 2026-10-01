@@ -1,13 +1,16 @@
-"""Generate frozen backend trajectory reference data from ``gtm_ad``.
+"""从 `gtm_ad` 生成冻结的后端轨迹参考数据。
 
-The regular test suite reads the generated ``gtm_backend_trajectory.npz`` and
-does not import the external ``gtm_ad`` checkout.  Re-run this script manually
-when the GTM reference model or the backend-parity scenario changes:
+常规测试只读取生成的 `gtm_backend_trajectory.npz`，不导入外部 `gtm_ad`
+checkout；GTM 参考模型或后端一致性场景变化时手动重跑本脚本。
 
+Note:
+    参考 checkout 不在 FlyRuler 工作区默认的兄弟项目路径时，设置
+    `GTM_AD_PATH=/path/to/gtm_ad`。
+
+Examples:
+    ```bash
     uv run python tests/generate_gtm_backend_reference.py
-
-Set ``GTM_AD_PATH=/path/to/gtm_ad`` when the reference checkout is not at the
-default sibling project path used by the FlyRuler workspace.
+    ```
 """
 
 from __future__ import annotations

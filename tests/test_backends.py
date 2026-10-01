@@ -361,7 +361,7 @@ def test_backend_one_step_matches_frozen_gtm_ad_trajectory(
 
 
 def test_zero_rudder_retains_local_control_effectiveness() -> None:
-    """The piecewise rudder table must have a usable derivative at trim."""
+    """分段方向舵表在配平点必须有可用的导数。"""
 
     model = _compiled_backend("casadi")
     x_sym = ca.SX.sym("x", model.n_x)
@@ -389,7 +389,7 @@ def test_zero_rudder_retains_local_control_effectiveness() -> None:
 
 
 def test_zero_speed_airdata_jacobian_is_finite() -> None:
-    """Regularized fixed-wing air data must remain differentiable at rest."""
+    """正则化后的固定翼空速数据在静止时必须保持可微。"""
 
     model = _compiled_backend("casadi")
     x_sym = ca.SX.sym("zero_speed_x", model.n_x)

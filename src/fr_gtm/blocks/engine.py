@@ -1,4 +1,4 @@
-"""GTM twin-engine force and moment block."""
+"""GTM 双发推力与力矩 Block。"""
 
 import fly_ruler_core as fr
 import numpy as np
@@ -25,17 +25,28 @@ def _engine_loads(
     pressure_ratio: Signal,
     qbar: Signal,
 ) -> tuple[Signal, Signal]:
-    """Evaluate both engines in FRD axes using gtm_ad polynomial ordering."""
+    """按 gtm_ad 多项式顺序在 FRD 轴中计算两台发动机的载荷。
+
+    Args:
+        cfg: GTM 配置，提供发动机多项式、安装位置/方向与参考面积。
+        throttle: 油门百分比，单位 %，范围 [0, 100]。
+        omega_body: 机体系角速率，单位 rad/s，用于转子陀螺力矩。
+        pressure_ratio: 当地静压与海平面静压之比，无量纲。
+        qbar: 动压，单位 Pa，用于冲压阻力。
+
+    Returns:
+        tuple[Signal, Signal]: 依次为机体系合力（N）与合力矩（N·m）。
+    """
 
     engine = cfg.engine
     aircraft = cfg.aircraft
     left_direction = fr.math.vector(_engine_direction(aircraft.engl_ang).tolist())
     right_direction = fr.math.vector(_engine_direction(aircraft.engr_ang).tolist())
     left_arm = fr.math.vector(
-        (np.asarray(aircraft.engl_pos) - np.asarray(aircraft.cg_pos0)).tolist()
+        (np.asarray(aircraft.engl_pos) - np.asarray(engine.cg_pos)).tolist()
     )
     right_arm = fr.math.vector(
-        (np.asarray(aircraft.engr_pos) - np.asarray(aircraft.cg_pos0)).tolist()
+        (np.asarray(aircraft.engr_pos) - np.asarray(engine.cg_pos)).tolist()
     )
 
     # Coefficients are highest-order first, matching fr.math.polyval and gtm_ad.
@@ -105,11 +116,15 @@ def _engine_loads(
 
 @fr.block
 def Engine(cfg: GTMConfig) -> None:
-    """Compute twin-engine FRD loads from throttle, air-data and body rates.
+    """由油门、空速与机体角速率计算双发 FRD 载荷。
 
-    Actuator channel 3 is throttle percent. Both engines currently share the
-    same reference-RPM/thrust polynomial but retain independent alignment and
-    position vectors for force direction and offset moments.
+    Args:
+        cfg: GTM 配置，提供发动机拉力/参考 RPM 多项式、安装几何与参考面积。
+
+    Note:
+        作动器第 4 通道（零基索引 3）是油门百分比。左右发动机共用同一套
+        参考 RPM/推力多项式，但保留各自的安装方向与位置向量，用于力方向
+        与偏置力矩。
     """
     actuators = fr.input("actuators", (4,), description="Actuator positions")
     omega_body = fr.input("omega_body", (3,), unit="rad/s")

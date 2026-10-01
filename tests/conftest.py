@@ -1,4 +1,4 @@
-"""Process-wide numerical backend policy for deterministic GTM tests."""
+"""为确定性 GTM 测试固定进程级数值后端策略。"""
 
 from __future__ import annotations
 

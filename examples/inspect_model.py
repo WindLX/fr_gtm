@@ -1,4 +1,4 @@
-"""Export GTM topology, generated source, and vector layout."""
+"""导出 GTM 拓扑、生成源码与向量布局。"""
 
 from pathlib import Path
 from typing import cast

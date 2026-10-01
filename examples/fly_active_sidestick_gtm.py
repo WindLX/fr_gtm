@@ -1,4 +1,9 @@
-"""Run GTM with two sticks, local recording, and schema-first live telemetry."""
+"""用双摇杆、本地记录与 schema 优先的实时遥测运行 GTM。
+
+本示例直接导入 `fly_stick` 与 `fly_ruler_proto_python`，属于可选依赖；
+在 `models/fr_gtm` 下先执行 `just setup-stick`，再用
+`just example-active-sidestick` 运行，冒烟测试用 `just test-examples-stick`。
+"""
 
 from __future__ import annotations
 
@@ -675,7 +680,7 @@ def main(
     no_stick: Annotated[bool, typer.Option("--no-stick")] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
 ) -> int:
-    """Run the ActiveSidestick/T16000 GTM realtime simulation."""
+    """运行 ActiveSidestick/T16000 的 GTM 实时仿真。"""
     options = Options(
         hz=hz,
         record_hz=record_hz,
