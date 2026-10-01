@@ -63,9 +63,5 @@ exclude = ["tests/generate_gtm_backend_reference.py"]
 follow_imports_for_stubs = true
 
 [[tool.mypy.overrides]]
-module = ["casadi", "casadi.*"]
-follow_imports = "skip"
-
-[[tool.mypy.overrides]]
 module = ["fly_ruler_proto_python", "fly_stick", "jax", "jax.*"]
 ignore_missing_imports = true

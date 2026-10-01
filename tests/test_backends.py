@@ -1,6 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import casadi as ca
 import fly_ruler_core as fr
@@ -216,7 +216,7 @@ def test_casadi_matches_numpy() -> None:
     evaluate = ca.Function(
         "gtm_backend_test",
         [x_symbol, u_symbol, p_symbol],
-        [casadi_xdot, casadi_y],
+        [cast(ca.SX, casadi_xdot), cast(ca.SX, casadi_y)],
     )
     xdot_value, y_value = evaluate(x, u, p)
     np.testing.assert_allclose(

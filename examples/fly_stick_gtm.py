@@ -321,9 +321,9 @@ def compile_model(
         return native
 
     if backend == "numpy":
-        backend_obj = fr.backends.numpy
+        backend_obj = cast(fr.Backend[object], fr.backends.numpy)
     elif backend == "casadi":
-        backend_obj = fr.backends.casadi
+        backend_obj = cast(fr.Backend[object], fr.backends.casadi)
     else:
         raise ValueError(f"unsupported backend: {backend}")
     if not isinstance(backend_obj, fr.Backend):

@@ -57,9 +57,12 @@ def main(
             ca.Function(
                 "fr_gtm_ground_step",
                 [t_symbol, x_symbol, xd_symbol, u_symbol, p_symbol],
-                list(
-                    model.discrete_fn(t_symbol, x_symbol, xd_symbol, u_symbol, p_symbol)
-                ),
+                [
+                    cast(ca.SX, output)
+                    for output in model.discrete_fn(
+                        t_symbol, x_symbol, xd_symbol, u_symbol, p_symbol
+                    )
+                ],
             ),
         )
     elif backend == "jax":
