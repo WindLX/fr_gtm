@@ -5,6 +5,7 @@ import fly_ruler_core as fr
 import numpy as np
 import pytest
 from fly_ruler_core import VariableInfo
+from fly_ruler_core._core import PyCompiler
 
 from fr_gtm import (
     GTMConfig,
@@ -34,6 +35,35 @@ def test_topology_contains_semantic_physical_blocks() -> None:
         "Root.mass",
         "Root.sensor",
     }.issubset(blocks)
+
+
+def test_system_level_control_effectiveness_query_resolves_through_plant() -> None:
+    cfg = GTMConfig.default()
+
+    @fr.system
+    def ControlledPlant() -> None:
+        command = fr.input("u", (4,))
+        disturbance = fr.input("d", (4,))
+        noise = fr.input("n", (21,))
+        plant = cast(fr.SubsystemHandle, GTMSystem(cfg, name="plant"))
+        command >> plant.u
+        disturbance >> plant.d
+        noise >> plant.n
+        effectiveness = fr.jacobian(
+            output=plant.moment_aero,
+            wrt=plant.actuator_position,
+            name="control_effectiveness",
+        )
+        fr.export(control_effectiveness=effectiveness)
+
+    builder = cast(fr.PyIrBuilder, ControlledPlant())
+    plan = PyCompiler.compile_from_builder(builder)
+    assert len(plan.jacobian_plans) == 1
+    query = plan.jacobian_plans[0]
+    assert query.output_path == "Root.plant::moment_aero"
+    assert query.wrt_path == "Root.plant::actuator_position"
+    assert query.output_shape == [3]
+    assert query.wrt_shape == [4]
 
 
 def test_layout_and_full_paths() -> None:
