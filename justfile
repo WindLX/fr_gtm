@@ -29,10 +29,12 @@ setup-stick:
 # 测试
 # ============================================================
 
-# 运行所有测试
+# 运行所有测试；逐文件各起一个 pytest 进程。
+# GTM 编译一次模型的常驻内存很高（单文件峰值约 6 GB），同一进程跑完全套会
+# 累积到约 13 GB，在 16 GB 的 CI runner 上会被 OOM 杀掉（exit 137）。
 test:
     echo "Running all tests..."
-    uv run pytest tests/ -v
+    for file in tests/test_*.py; do uv run pytest "$file" -v || exit 1; done
     echo "✓ All tests passed!"
 
 # 运行特定测试文件
