@@ -431,7 +431,7 @@ def Aero(cfg: GTMConfig) -> None:
     c_a_unc = fr.param("c_a_unc", (6,), default=[0.0] * 6)
     c_r_unc = fr.param("c_r_unc", (6,), default=[0.0] * 6)
 
-    dcm_body_to_ned = Quaternion.to_dcm(quat)
+    dcm_body_to_ned = Quaternion.to_matrix(quat)
     vel_ned = dcm_body_to_ned @ velocity
     altitude = -position[2]
     ground_speed = fr.math.smooth_norm(vel_ned[0:2], epsilon=1.0e-3)

@@ -8,12 +8,8 @@
 
 import fly_ruler_core as fr
 import numpy as np
-from fly_ruler_std.runtime import (
-    LinearizationSolver,
-    LinearizationSpec,
-    TrimSolver,
-    TrimSpec,
-)
+from fly_ruler_std.runtime.linearize import LinearizationSolver, LinearizationSpec
+from fly_ruler_std.runtime.trim import TrimSolver, TrimSpec
 
 from fr_gtm import GTMConfig, GTMSystem
 

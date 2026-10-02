@@ -11,7 +11,7 @@ import fly_ruler_core as fr
 import numpy as np
 import typer
 from fly_ruler_core.codegen import NativeCodegenSpec, codegen
-from fly_ruler_std.runtime import Recorder
+from fly_ruler_std.runtime.record import Recorder
 
 from fr_gtm import GTMConfig, GTMSystem, build_ground_initial_state
 

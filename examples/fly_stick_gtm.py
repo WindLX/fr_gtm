@@ -39,13 +39,13 @@ import fly_ruler_core as fr
 import numpy as np
 import typer
 from fly_ruler_core import PyIrBuilder
-from fly_ruler_std.runtime import (
+from fly_ruler_std.runtime.loop import (
     LoopTask,
-    Recorder,
     SimulationContext,
     make_discrete_model_task,
     run_async_realtime,
 )
+from fly_ruler_std.runtime.record import Recorder
 
 from fr_gtm import GTMConfig, GTMSystem, airdata_angles_to_proto_radians
 from fr_gtm.stick_input import STICK_VISUAL_MODEL_ID, StickAxes

@@ -5,7 +5,7 @@ from typing import cast
 
 import fly_ruler_core as fr
 import numpy as np
-from fly_ruler_std.runtime import Recorder
+from fly_ruler_std.runtime.record import Recorder
 
 from fr_gtm import GTMConfig, GTMSystem
 
