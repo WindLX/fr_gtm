@@ -3,7 +3,7 @@
 from importlib.util import find_spec
 from pathlib import Path
 from time import perf_counter
-from typing import Any, cast
+from typing import TypeVar
 
 import fly_ruler_core as fr
 import numpy as np
@@ -11,13 +11,34 @@ import numpy as np
 from fr_gtm import GTMConfig, GTMSystem
 
 ROOT = Path(__file__).resolve().parent.parent
+ArrayT = TypeVar("ArrayT")
+
+
+def _evaluate(model: fr.CompiledModel[ArrayT]) -> tuple[np.ndarray, np.ndarray]:
+    x = model.x.build(
+        {
+            "Root.eom::pos_ned": [0.0, 0.0, -1000.0],
+            "Root.eom::vel_body": [100.0, 0.0, 5.0],
+            "Root.eom::quat": [1.0, 0.0, 0.0, 0.0],
+            "Root.actuator::position": [-2.0, 1.0, 0.0, 40.0],
+        }
+    )
+    u = model.u.build(
+        {
+            "Root::u": [-2.0, 1.0, 0.0, 40.0],
+            "Root::d": np.zeros(4),
+            "Root::n": np.zeros(21),
+        }
+    )
+    xdot, _, y, _ = model.continuous_fn(0.0, x, model.xd.build(), u, model.p.default())
+    return (
+        np.asarray(xdot, dtype=float).reshape(-1),
+        np.asarray(y, dtype=float).reshape(-1),
+    )
 
 
 def main() -> None:
-    backends: list[tuple[str, fr.Backend[Any]]] = [
-        ("numpy", fr.backends.numpy),
-        ("casadi", fr.backends.casadi),
-    ]
+    names = ["numpy", "casadi"]
     if find_spec("jax") is not None:
         fr.configure_jax_runtime(
             fr.JaxRuntimePolicy(
@@ -26,58 +47,30 @@ def main() -> None:
                 enable_x64=True,
             )
         )
-        backends.append(("jax", fr.backends.jax))
+        names.append("jax")
     else:
         print("JAX is not installed; skipping it.")
 
     results: dict[str, tuple[float, np.ndarray, np.ndarray]] = {}
-    for name, backend in backends:
+    for name in names:
         started = perf_counter()
-        model = fr.Compiler(
+        compiler = fr.Compiler(
             fr.CompilerSpec(
-                backend=backend,
-                integrator="euler",
-                dt=0.01,
-                artifact_dir=ROOT / "build" / "flyruler",
+                integrator="euler", dt=0.01, artifact_dir=ROOT / "build" / "flyruler"
             )
-        ).compile(cast(fr.PyIrBuilder, GTMSystem(GTMConfig.default(), name="Root")))
-        compile_ms = (perf_counter() - started) * 1000.0
-        x = model.x.build(
-            {
-                "Root.eom::pos_ned": [0.0, 0.0, -1000.0],
-                "Root.eom::vel_body": [100.0, 0.0, 5.0],
-                "Root.eom::quat": [1.0, 0.0, 0.0, 0.0],
-                "Root.actuator::position": [-2.0, 1.0, 0.0, 40.0],
-            }
         )
-        u = model.u.build(
-            {
-                "Root::u": [-2.0, 1.0, 0.0, 40.0],
-                "Root::d": np.zeros(4),
-                "Root::n": np.zeros(21),
-            }
-        )
-        if name == "casadi":
-            import casadi as ca
-
-            x_sym = ca.SX.sym("x", model.module.n_x)
-            u_sym = ca.SX.sym("u", model.module.n_u)
-            p_sym = ca.SX.sym("p", model.module.n_p)
-            xdot_expr, _, y_expr, _ = model.continuous_fn(
-                0.0, x_sym, ca.SX.zeros(model.module.n_xd), u_sym, p_sym
-            )
-            evaluate = ca.Function(
-                "gtm_compare", [x_sym, u_sym, p_sym], [xdot_expr, y_expr]
-            )
-            xdot, y = evaluate(x, u, model.p.default())
+        builder = GTMSystem.build("Root", GTMConfig.default())
+        if name == "numpy":
+            xdot, y = _evaluate(compiler.compile(builder, target=fr.targets.numpy))
+        elif name == "casadi":
+            xdot, y = _evaluate(compiler.compile(builder, target=fr.targets.casadi))
         else:
-            xdot, _, y, _ = model.continuous_fn(
-                0.0, x, model.xd.build(), u, model.p.default()
-            )
+            xdot, y = _evaluate(compiler.compile(builder, target=fr.targets.jax))
+        compile_ms = (perf_counter() - started) * 1000.0
         results[name] = (
             compile_ms,
-            np.asarray(xdot, dtype=float).reshape(-1),
-            np.asarray(y, dtype=float).reshape(-1),
+            xdot,
+            y,
         )
 
     _, xdot_ref, y_ref = results["numpy"]

@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from time import perf_counter
-from typing import cast
 
 import fly_ruler_core as fr
 
@@ -30,17 +29,16 @@ def main() -> None:
     import jax
     import jax.numpy as jnp
 
-    builder = cast(fr.PyIrBuilder, GTMSystem(GTMConfig.default(), name="Root"))
+    builder = GTMSystem.build("Root", GTMConfig.default())
     started = perf_counter()
     model = fr.Compiler(
         fr.CompilerSpec(
-            backend=fr.backends.jax,
             integrator="rk4",
             dt=0.01,
             artifact_dir=root / "build" / "flyruler",
             cache_policy="rebuild",
         )
-    ).compile(builder)
+    ).compile(builder, target=fr.targets.jax)
     model_build_s = perf_counter() - started
 
     x = jnp.asarray(build_initial_state(model))
@@ -69,7 +67,7 @@ def main() -> None:
     discrete_lowered.compile()
     discrete_compile_s = perf_counter() - started
 
-    source = model.module.source_code
+    source = model.inspect.sources["jax"]
     result = {
         "model_build_s": model_build_s,
         "source_bytes": len(source.encode()),

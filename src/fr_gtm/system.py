@@ -53,6 +53,7 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
     )
 
     actuator = SimpleActuator(
+        "actuator",
         SimpleActuatorConfig(
             adim=4,
             gain=cfg.actuator.gain,
@@ -61,20 +62,19 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
             position_upper=cfg.actuator.position_upper,
             expose_params=False,
         ),
-        name="actuator",
     )
-    wind = cast(Any, Wind(cfg, name="wind"))
-    mass = Mass(cfg, name="mass")
-    aero = Aero(cfg, name="aero")
-    engine = Engine(cfg, name="engine")
+    wind = cast(Any, Wind("wind", cfg))
+    mass = Mass("mass", cfg)
+    aero = Aero("aero", cfg)
+    engine = Engine("engine", cfg)
     eom = RigidBody6DOFQuaternion(
+        "eom",
         RigidBody6DOFConfig(
             enable_external_mass=True,
             enable_geodetic_output=False,
         ),
-        name="eom",
     )
-    sensor = Sensor(cfg.sensor, name="sensor")
+    sensor = Sensor("sensor", cfg.sensor)
 
     # Command dynamics and environmental disturbances remain independent root
     # inputs, which permits deterministic tests and externally sampled noise.
@@ -112,7 +112,7 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
     mass.inertia_inv >> eom.inertia_inv
     gravity_body = eom.DCM.T @ fr.math.vector([0.0, 0.0, mass.weight[0]])
     if cfg.ground.enabled:
-        ground = cast(fr.SubsystemHandle, GroundContact(cfg.ground, name="ground"))
+        ground = GroundContact("ground", cfg.ground)
         eom.pos_ned_out >> ground.position
         eom.vel_body_out >> ground.velocity_body
         eom.DCM >> ground.dcm

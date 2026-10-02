@@ -47,13 +47,14 @@ def Wind(cfg: GTMConfig) -> None:
     DCM = fr.input("DCM", (3, 3))
     noise = fr.input("noise", (4,))
 
-    params = WindParams(name="params")
+    params = WindParams("params")
     shear = WindShear(
+        "shear",
         WindShearConfig(runway_altitude=cfg.wind.runway_altitude, expose_params=False),
-        name="shear",
     )
-    steady = SteadyWind(SteadyWindConfig(enable_wind_shear=True), name="steady")
+    steady = SteadyWind("steady", SteadyWindConfig(enable_wind_shear=True))
     dryden = DrydenTurbulence(
+        "dryden",
         DrydenConfig(
             wind_speed_low=cfg.wind.wind_speed_low,
             scale_length_high=cfg.wind.scale_length_high,
@@ -62,7 +63,6 @@ def Wind(cfg: GTMConfig) -> None:
             minimum_airspeed=0.1,
             minimum_scale_length=0.1,
         ),
-        name="dryden",
     )
 
     airspeed = fr.math.vector([fr.math.smooth_norm(velocity, epsilon=1.0e-3)])

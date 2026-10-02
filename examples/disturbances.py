@@ -1,7 +1,5 @@
 """演示稳态风、Dryden 湍流、参数不确定性与传感器噪声。"""
 
-from typing import cast
-
 import fly_ruler_core as fr
 import numpy as np
 
@@ -9,10 +7,10 @@ from fr_gtm import GTMConfig, GTMSystem
 
 
 def main() -> None:
-    builder = cast(fr.PyIrBuilder, GTMSystem(GTMConfig.default(), name="Root"))
-    model = fr.Compiler(
-        fr.CompilerSpec(backend=fr.backends.numpy, integrator="euler", dt=0.01)
-    ).compile(builder)
+    builder = GTMSystem.build("Root", GTMConfig.default())
+    model = fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
+        builder, target=fr.targets.numpy
+    )
     x = model.x.build(
         {
             "Root.eom::pos_ned": [0.0, 0.0, -500.0],

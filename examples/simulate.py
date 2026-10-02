@@ -1,7 +1,6 @@
 """运行一段标称短仿真并用标准 Recorder 保存结果。"""
 
 from pathlib import Path
-from typing import cast
 
 import fly_ruler_core as fr
 import numpy as np
@@ -11,10 +10,10 @@ from fr_gtm import GTMConfig, GTMSystem
 
 
 def main() -> None:
-    builder = cast(fr.PyIrBuilder, GTMSystem(GTMConfig.default(), name="Root"))
-    model = fr.Compiler(
-        fr.CompilerSpec(backend=fr.backends.numpy, integrator="rk4", dt=0.01)
-    ).compile(builder)
+    builder = GTMSystem.build("Root", GTMConfig.default())
+    model = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=0.01)).compile(
+        builder, target=fr.targets.numpy
+    )
     x = model.x.build(
         {
             "Root.eom::pos_ned": [0.0, 0.0, -1000.0],

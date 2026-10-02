@@ -1,6 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import casadi as ca
 import fly_ruler_core as fr
@@ -17,7 +17,7 @@ TRAJECTORY_BACKENDS = ("numpy", "casadi", "native", "jax")
 
 
 def _builder(*, enable_ground: bool = False) -> fr.PyIrBuilder:
-    builder = GTMSystem(GTMConfig.default(enable_ground=enable_ground), name="Root")
+    builder = GTMSystem.build("Root", GTMConfig.default(enable_ground=enable_ground))
     if not isinstance(builder, fr.PyIrBuilder):
         raise TypeError("expected top-level GTM builder")
     return builder
@@ -89,30 +89,24 @@ def _compiled_backend(name: str, *, enable_ground: bool = False) -> Any:
     dt = float(BACKEND_REFERENCE["dt"])
     if name == "jax":
         pytest.importorskip("jax")
-        backend: fr.Backend[Any] = fr.backends.jax
-        return fr.Compiler(
-            fr.CompilerSpec(backend=backend, integrator="rk4", dt=dt)
-        ).compile(_builder(enable_ground=enable_ground))
+        return fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=dt)).compile(
+            _builder(enable_ground=enable_ground), target=fr.targets.jax
+        )
     if name == "native":
-        try:
-            from fly_ruler_core.codegen import NativeCodegenSpec, codegen
-        except ImportError as exc:
-            pytest.skip(f"native codegen dependencies are not available: {exc}")
-        casadi_model = fr.Compiler(
-            fr.CompilerSpec(backend=fr.backends.casadi, integrator="rk4", dt=dt)
-        ).compile(_builder(enable_ground=enable_ground))
-        return codegen(casadi_model, NativeCodegenSpec(batch_size=1))
+        casadi_model = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=dt)).compile(
+            _builder(enable_ground=enable_ground), target=fr.targets.casadi
+        )
+        return fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=dt)).convert(
+            casadi_model, target=fr.targets.NativeTarget()
+        )
 
+    compiler = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=dt))
+    builder = _builder(enable_ground=enable_ground)
     if name == "numpy":
-        backend = fr.backends.numpy
-    elif name == "casadi":
-        backend = fr.backends.casadi
-    else:
-        raise ValueError(f"unsupported backend: {name}")
-    assert isinstance(backend, fr.Backend)
-    return fr.Compiler(
-        fr.CompilerSpec(backend=backend, integrator="rk4", dt=dt)
-    ).compile(_builder(enable_ground=enable_ground))
+        return compiler.compile(builder, target=fr.targets.numpy)
+    if name == "casadi":
+        return compiler.compile(builder, target=fr.targets.casadi)
+    raise ValueError(f"unsupported backend: {name}")
 
 
 @lru_cache(maxsize=None)
@@ -124,10 +118,10 @@ def _casadi_functions(model_id: int, n_x: int, n_xd: int, n_u: int, n_p: int) ->
     xd_sym = ca.SX.sym("xd", n_xd)
     u_sym = ca.SX.sym("u", n_u)
     p_sym = ca.SX.sym("p", n_p)
-    x_next, xd_next, y_disc, effects = model.discrete_fn(
+    x_next, xd_next, y_disc, effects = model.sx.discrete_fn(
         t_sym, x_sym, xd_sym, u_sym, p_sym
     )
-    xdot, xd_cont, y_cont, effects_cont = model.continuous_fn(
+    xdot, xd_cont, y_cont, effects_cont = model.sx.continuous_fn(
         t_sym, x_sym, xd_sym, u_sym, p_sym
     )
     return (
@@ -159,10 +153,10 @@ def _evaluate_backend(
     if name == "casadi":
         discrete_fn, continuous_fn = _casadi_functions(
             id(model),
-            model.module.n_x,
-            model.module.n_xd,
-            model.module.n_u,
-            model.module.n_p,
+            model.n_x,
+            model.n_xd,
+            model.n_u,
+            model.n_p,
         )
         x_next, _, _, _ = discrete_fn(t, x, xd, u, p)
         _, _, y, _ = continuous_fn(t, x, xd, u, p)
@@ -176,12 +170,12 @@ def _evaluate_backend(
 
 
 def test_casadi_matches_numpy() -> None:
-    numpy_model = fr.Compiler(
-        fr.CompilerSpec(backend=fr.backends.numpy, integrator="euler", dt=0.01)
-    ).compile(_builder())
-    casadi_model = fr.Compiler(
-        fr.CompilerSpec(backend=fr.backends.casadi, integrator="euler", dt=0.01)
-    ).compile(_builder())
+    numpy_model = fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
+        _builder(), target=fr.targets.numpy
+    )
+    casadi_model = fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
+        _builder(), target=fr.targets.casadi
+    )
 
     x = numpy_model.x.build(
         {
@@ -203,20 +197,20 @@ def test_casadi_matches_numpy() -> None:
         0.0, x, numpy_model.xd.build(), u, p
     )
 
-    x_symbol = ca.SX.sym("x", casadi_model.module.n_x)
-    u_symbol = ca.SX.sym("u", casadi_model.module.n_u)
-    p_symbol = ca.SX.sym("p", casadi_model.module.n_p)
-    casadi_xdot, _, casadi_y, _ = casadi_model.continuous_fn(
+    x_symbol = ca.SX.sym("x", casadi_model.n_x)
+    u_symbol = ca.SX.sym("u", casadi_model.n_u)
+    p_symbol = ca.SX.sym("p", casadi_model.n_p)
+    casadi_xdot, _, casadi_y, _ = casadi_model.sx.continuous_fn(
         0.0,
         x_symbol,
-        ca.SX.zeros(casadi_model.module.n_xd),
+        ca.SX.zeros(casadi_model.n_xd),
         u_symbol,
         p_symbol,
     )
     evaluate = ca.Function(
         "gtm_backend_test",
         [x_symbol, u_symbol, p_symbol],
-        [cast(ca.SX, casadi_xdot), cast(ca.SX, casadi_y)],
+        [casadi_xdot, casadi_y],
     )
     xdot_value, y_value = evaluate(x, u, p)
     np.testing.assert_allclose(
@@ -257,14 +251,14 @@ def test_ground_contact_one_step_matches_numpy(backend: str) -> None:
     )
     if backend == "casadi":
         t_sym = ca.SX.sym("ground_t")
-        x_sym = ca.SX.sym("ground_x", candidate.module.n_x)
-        xd_sym = ca.SX.sym("ground_xd", candidate.module.n_xd)
-        u_sym = ca.SX.sym("ground_u", candidate.module.n_u)
-        p_sym = ca.SX.sym("ground_p", candidate.module.n_p)
+        x_sym = ca.SX.sym("ground_x", candidate.n_x)
+        xd_sym = ca.SX.sym("ground_xd", candidate.n_xd)
+        u_sym = ca.SX.sym("ground_u", candidate.n_u)
+        p_sym = ca.SX.sym("ground_p", candidate.n_p)
         step_fn = ca.Function(
             "fr_gtm_ground_backend_test",
             [t_sym, x_sym, xd_sym, u_sym, p_sym],
-            list(candidate.discrete_fn(t_sym, x_sym, xd_sym, u_sym, p_sym)),
+            list(candidate.sx.discrete_fn(t_sym, x_sym, xd_sym, u_sym, p_sym)),
         )
         candidate_result = step_fn(
             0.0,
@@ -370,18 +364,18 @@ def test_zero_rudder_retains_local_control_effectiveness() -> None:
         ca.SX(0.0), x_sym, ca.SX.zeros(model.n_xd), u_sym, model.p.default()
     )
     actuator_row = next(
-        row for row in model.x.layout_rows() if row["path"] == "Root.actuator::position"
+        row for row in model.x.infos if row.path == "Root.actuator::position"
     )
-    nz_row = next(row for row in model.y.layout_rows() if row["path"] == "Root::nz")
+    nz_row = next(row for row in model.y.infos if row.path == "Root::nz")
     derivative = ca.jacobian(
-        y_sym[int(nz_row["start"])],
-        x_sym[int(actuator_row["start"]) + 2],
+        y_sym[int(nz_row.start)],
+        x_sym[int(actuator_row.start) + 2],
     )
     derivative_fn = ca.Function(
         "zero_rudder_control_effectiveness", [x_sym, u_sym], [derivative]
     )
     x = _state(model, BACKEND_REFERENCE["x_samples"][0])
-    x[int(actuator_row["start"]) + 2] = 0.0
+    x[int(actuator_row.start) + 2] = 0.0
     _, u, _ = _inputs(model)
     value = float(derivative_fn(x, u))
     assert np.isfinite(value)
@@ -399,18 +393,16 @@ def test_zero_speed_airdata_jacobian_is_finite() -> None:
     )
     selected_outputs = []
     for path in ("Root::V", "Root::alpha", "Root::beta"):
-        row = next(item for item in model.y.layout_rows() if item["path"] == path)
-        selected_outputs.append(y_sym[int(row["start"]) : int(row["stop"])])
+        row = next(item for item in model.y.infos if item.path == path)
+        selected_outputs.append(y_sym[int(row.start) : int(row.stop)])
     derivative = ca.Function(
         "gtm_zero_speed_derivative",
         [x_sym, u_sym],
         [ca.jacobian(ca.vertcat(xdot, *selected_outputs), x_sym), y_sym],
     )
     x = _state(model, BACKEND_REFERENCE["x_samples"][0])
-    velocity = next(
-        row for row in model.x.layout_rows() if row["path"] == "Root.eom::vel_body"
-    )
-    x[int(velocity["start"]) : int(velocity["stop"])] = 0.0
+    velocity = next(row for row in model.x.infos if row.path == "Root.eom::vel_body")
+    x[int(velocity.start) : int(velocity.stop)] = 0.0
     _, u, _ = _inputs(model)
     jacobian, outputs = derivative(x, u)
     assert np.isfinite(np.asarray(jacobian)).all()

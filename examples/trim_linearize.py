@@ -19,12 +19,12 @@ def _array(values: list[float] | np.ndarray) -> np.ndarray:
 
 
 def main() -> None:
-    builder = GTMSystem(GTMConfig.default(), name="Root")
+    builder = GTMSystem.build("Root", GTMConfig.default())
     if not isinstance(builder, fr.PyIrBuilder):
         raise TypeError("expected top-level GTM builder")
-    model = fr.Compiler(
-        fr.CompilerSpec(backend=fr.backends.casadi, integrator="rk4", dt=0.01)
-    ).compile(builder)
+    model = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=0.01)).compile(
+        builder, target=fr.targets.casadi
+    )
 
     trim = TrimSolver(
         model,

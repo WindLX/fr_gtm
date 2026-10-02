@@ -17,11 +17,11 @@ CASE_NAMES = REFERENCE["name"].tolist()
 @lru_cache(maxsize=None)
 def _model(fullscale: bool, mode: str) -> fr.CompiledModel[Any]:
     cfg = GTMConfig.default(fullscale, Mode(mode))
-    builder = GTMSystem(cfg, name="Root")
+    builder = GTMSystem.build("Root", cfg)
     assert isinstance(builder, fr.PyIrBuilder)
-    return fr.Compiler(
-        fr.CompilerSpec(backend=fr.backends.numpy, integrator="euler", dt=0.01)
-    ).compile(builder)
+    return fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
+        builder, target=fr.targets.numpy
+    )
 
 
 def _state(model: fr.CompiledModel[Any], x: np.ndarray) -> np.ndarray:

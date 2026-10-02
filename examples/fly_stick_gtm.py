@@ -33,12 +33,11 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
 import fly_ruler_core as fr
 import numpy as np
 import typer
-from fly_ruler_core import PyIrBuilder
 from fly_ruler_std.runtime.loop import (
     LoopTask,
     SimulationContext,
@@ -328,22 +327,20 @@ def compile_model(
     integrator: str,
     backend: str,
 ) -> Any:
-    builder = GTMSystem(cfg, name="Root")
-    if not isinstance(builder, PyIrBuilder):
-        raise TypeError("expected top-level GTM builder")
+    builder = GTMSystem.build("Root", cfg)
 
     if backend == "native":
-        from fly_ruler_core.codegen import NativeCodegenSpec, codegen
-
         print(
             "compiling GTM with CasADi for native codegen "
             f"(dt={dt:.6g}, integrator={integrator})..."
         )
-        compiled = fr.Compiler(
-            fr.CompilerSpec(backend=fr.backends.casadi, integrator=integrator, dt=dt)
-        ).compile(builder)
+        compiled = fr.Compiler(fr.CompilerSpec(integrator=integrator, dt=dt)).compile(
+            builder, target=fr.targets.casadi
+        )
         started = time.monotonic()
-        native = codegen(compiled, NativeCodegenSpec(batch_size=1))
+        native = fr.Compiler(fr.CompilerSpec()).convert(
+            compiled, target=fr.targets.NativeTarget()
+        )
         elapsed = time.monotonic() - started
         cache_state = (
             "cached"
@@ -353,18 +350,13 @@ def compile_model(
         print(f"native module ready: {cache_state} in {elapsed:.2f}s")
         return native
 
-    if backend == "numpy":
-        backend_obj = cast(fr.Backend[object], fr.backends.numpy)
-    elif backend == "casadi":
-        backend_obj = cast(fr.Backend[object], fr.backends.casadi)
-    else:
-        raise ValueError(f"unsupported backend: {backend}")
-    if not isinstance(backend_obj, fr.Backend):
-        raise RuntimeError(f"backend {backend!r} is unavailable")
     print(f"compiling GTM with {backend} backend (Python runtime)...")
-    return fr.Compiler(
-        fr.CompilerSpec(backend=backend_obj, integrator=integrator, dt=dt)
-    ).compile(builder)
+    compiler = fr.Compiler(fr.CompilerSpec(integrator=integrator, dt=dt))
+    if backend == "numpy":
+        return compiler.compile(builder, target=fr.targets.numpy)
+    if backend == "casadi":
+        return compiler.compile(builder, target=fr.targets.casadi)
+    raise ValueError(f"unsupported backend: {backend}")
 
 
 @dataclass

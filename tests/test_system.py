@@ -17,15 +17,15 @@ from fr_gtm.blocks import Engine, Mass
 
 
 def _compile(cfg: GTMConfig | None = None) -> fr.CompiledModel[Any]:
-    builder = GTMSystem(cfg or GTMConfig.default(), name="Root")
+    builder = GTMSystem.build("Root", cfg or GTMConfig.default())
     assert isinstance(builder, fr.PyIrBuilder)
-    return fr.Compiler(
-        fr.CompilerSpec(backend=fr.backends.numpy, integrator="euler", dt=0.01)
-    ).compile(builder)
+    return fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
+        builder, target=fr.targets.numpy
+    )
 
 
 def test_topology_contains_semantic_physical_blocks() -> None:
-    builder = GTMSystem(GTMConfig.default(), name="Root")
+    builder = GTMSystem.build("Root", GTMConfig.default())
     assert isinstance(builder, fr.PyIrBuilder)
     blocks = set(builder._artifact_schema(include_exprs=False)["blocks"])
     assert {
@@ -46,7 +46,7 @@ def test_system_level_control_effectiveness_query_resolves_through_plant() -> No
         command = fr.input("u", (4,))
         disturbance = fr.input("d", (4,))
         noise = fr.input("n", (21,))
-        plant = cast(fr.SubsystemHandle, GTMSystem(cfg, name="plant"))
+        plant = GTMSystem("plant", cfg)
         command >> plant.u
         disturbance >> plant.d
         noise >> plant.n
@@ -57,7 +57,7 @@ def test_system_level_control_effectiveness_query_resolves_through_plant() -> No
         )
         fr.export(control_effectiveness=effectiveness)
 
-    builder = cast(fr.PyIrBuilder, ControlledPlant())
+    builder = ControlledPlant.build("ControlledPlant")
     plan = PyCompiler.compile_from_builder(builder)
     assert len(plan.jacobian_plans) == 1
     query = plan.jacobian_plans[0]
@@ -69,9 +69,9 @@ def test_system_level_control_effectiveness_query_resolves_through_plant() -> No
 
 def test_layout_and_full_paths() -> None:
     model = _compile()
-    assert model.module.n_x == 25
-    assert model.module.n_xdot == 24
-    assert model.module.n_p == 33
+    assert model.n_x == 25
+    assert model.n_xdot == 24
+    assert model.n_p == 33
     assert "Root.eom::quat" in model.x.keys
     assert "Root.wind.dryden::w_gw" in model.x.keys
     assert "Root.aero::c_static_unc" in model.p.keys
@@ -165,9 +165,9 @@ def test_optional_ground_contact_layout_and_static_support(
 ) -> None:
     cfg = GTMConfig.default(is_fullscale, enable_ground=True)
     model = _compile(cfg)
-    assert model.module.n_x == 25
-    assert model.module.n_u == 29
-    assert model.module.n_p == 34
+    assert model.n_x == 25
+    assert model.n_u == 29
+    assert model.n_p == 34
     assert "Root.ground.params::ground_down" in model.p.keys
     assert "Root::ground_normal_forces" in model.y.keys
 
@@ -246,13 +246,13 @@ def _mass_block_outputs(cfg: GTMConfig) -> Mapping[str, Any]:
 
     @fr.system
     def MassOnly() -> None:
-        mass = Mass(cfg, name="mass")
+        mass = Mass("mass", cfg)
         fr.export(mass_value=mass.mass, weight_value=mass.weight)
 
-    builder = cast(fr.PyIrBuilder, MassOnly())
-    model = fr.Compiler(
-        fr.CompilerSpec(backend=fr.backends.numpy, integrator="euler", dt=0.01)
-    ).compile(builder)
+    builder = MassOnly.build("MassOnly")
+    model = fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
+        builder, target=fr.targets.numpy
+    )
     _, _, y, _ = model.continuous_fn(
         0.0, model.x.build(), model.xd.build(), model.u.build(), model.p.build()
     )
@@ -282,7 +282,7 @@ def _engine_block_moment(cfg: GTMConfig) -> np.ndarray:
 
     @fr.system
     def EngineOnly() -> None:
-        engine = Engine(cfg, name="engine")
+        engine = Engine("engine", cfg)
         actuators = fr.input("actuators", (4,))
         omega_body = fr.input("omega_body", (3,))
         pressure_ratio = fr.input("pressure_ratio", (1,))
@@ -293,10 +293,10 @@ def _engine_block_moment(cfg: GTMConfig) -> np.ndarray:
         qbar >> engine.qbar
         fr.export(engine_force=engine.force, engine_moment=engine.moment)
 
-    builder = cast(fr.PyIrBuilder, EngineOnly())
-    model = fr.Compiler(
-        fr.CompilerSpec(backend=fr.backends.numpy, integrator="euler", dt=0.01)
-    ).compile(builder)
+    builder = EngineOnly.build("EngineOnly")
+    model = fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
+        builder, target=fr.targets.numpy
+    )
     u = model.u.build(
         {
             "Root::actuators": np.array([0.0, 0.0, 0.0, 60.0]),

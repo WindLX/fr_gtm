@@ -1,7 +1,6 @@
 """导出 GTM 拓扑、生成源码与向量布局。"""
 
 from pathlib import Path
-from typing import cast
 
 import fly_ruler_core as fr
 
@@ -10,15 +9,14 @@ from fr_gtm import GTMConfig, GTMSystem
 
 def main() -> None:
     root = Path(__file__).resolve().parent.parent
-    builder = cast(fr.PyIrBuilder, GTMSystem(GTMConfig.default(), name="Root"))
+    builder = GTMSystem.build("Root", GTMConfig.default())
     model = fr.Compiler(
         fr.CompilerSpec(
-            backend=fr.backends.numpy,
             integrator="rk4",
             dt=0.01,
             artifact_dir=root / "build" / "flyruler",
         )
-    ).compile(builder)
+    ).compile(builder, target=fr.targets.numpy)
     assert model.artifact is not None
 
     print(f"artifact: {model.artifact.path}")
