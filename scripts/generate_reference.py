@@ -208,9 +208,7 @@ def generate(gtm_ad: Path, output: Path) -> None:
             mode=Mode(case.mode),
         )
         model = GTMModel.build(JaxBackend, config, GTMConstraints.build())
-        x, u, p, d, n = map(
-            jnp.asarray, (case.x, case.u, case.p, case.d, case.n)
-        )
+        x, u, p, d, n = map(jnp.asarray, (case.x, case.u, case.p, case.d, case.n))
         context, _ = model.fm_fn(x, u, p, d)
         values = {
             "xdot": np.asarray(model.x_dot_fn(x, u, p, d)),
@@ -235,10 +233,7 @@ def generate(gtm_ad: Path, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         output,
-        **{
-            key: np.asarray(value)
-            for key, value in results.items()
-        },
+        **{key: np.asarray(value) for key, value in results.items()},
     )
     print(f"Wrote {len(results['name'])} reference cases to {output}")
 
