@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import Enum
 from importlib import resources
 from math import pi, sqrt
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 import numpy as np
 import rtoml
@@ -20,6 +21,8 @@ from fly_ruler_std.blocks.physics import (
 )
 from fly_ruler_std.libs.units import Force, Inertia, Length, Pressure, Speed
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from .resources import AeroTableResources, load_aero_tables
 
 
 class Mode(str, Enum):
@@ -266,96 +269,16 @@ class SensorConfig(BaseModel):
     )
 
 
-class ReynoldsConfig(BaseModel):
-    """以英尺高度与无量纲马赫数为坐标的雷诺数查表配置。
-
-    Attributes:
-        altitude_ft: 高度断点，单位 ft。
-        mach_bp: 马赫数断点，无量纲。
-        reynolds_values: 雷诺数表值。
-
-    Note:
-        气动 Block 在插值前把存储的 MATLAB 表按 Fortran 序展平为
-        `(len(altitude_ft), len(mach_bp))`；改变该方向会影响所有以雷诺数为轴
-        的表格。这些字段是气动表缓存（`exclude=True`），不会写入 Pydantic
-        序列化结果。
-    """
-
-    altitude_ft: Any = Field(default=None, exclude=True)  # Altitude breakpoints (ft).
-    mach_bp: Any = Field(default=None, exclude=True)  # Mach breakpoints.
-    reynolds_values: Any = Field(default=None, exclude=True)  # Reynolds table values.
-
-
-class BasicAirframeConfig(BaseModel):
-    """基线气动力/力矩系数表。
-
-    Attributes:
-        alpha_c2: C2 数据的迎角断点，单位 deg。
-        beta_c2: C2 数据的侧滑角断点，单位 deg。
-        reynolds_c2: C2 数据的雷诺数断点，无量纲。
-        data_cx_cz: `[CX, CZ]` 表，轴为 alpha/beta/Reynolds。
-        alpha_c4: C4 数据的迎角断点，单位 deg。
-        beta_c4: C4 数据的侧滑角断点，单位 deg。
-        data_cy_cl_cm_cn: `[CY, Cl, Cm, Cn]` 表，轴为 alpha/beta。
-
-    Note:
-        C2 数据在 alpha/beta/Reynolds 上返回 `[CX, CZ]`，C4 数据在
-        alpha/beta 上返回 `[CY, Cl, Cm, Cn]`；角度均为源表度数。这些字段是
-        气动表缓存（`exclude=True`），不会写入 Pydantic 序列化结果。
-    """
-
-    alpha_c2: Any = Field(default=None, exclude=True)  # C2 alpha breakpoints (deg).
-    beta_c2: Any = Field(default=None, exclude=True)  # C2 beta breakpoints (deg).
-    reynolds_c2: Any = Field(default=None, exclude=True)  # C2 Reynolds breakpoints.
-    data_cx_cz: Any = Field(default=None, exclude=True)  # [CX, CZ] table.
-    alpha_c4: Any = Field(default=None, exclude=True)  # C4 alpha breakpoints (deg).
-    beta_c4: Any = Field(default=None, exclude=True)  # C4 beta breakpoints (deg).
-    data_cy_cl_cm_cn: Any = Field(default=None, exclude=True)  # [CY, Cl, Cm, Cn].
-
-
 class ControlSurfacesConfig(BaseModel):
-    """升降舵/副翼/方向舵增量表与展向力臂。
+    """舵面展向力臂。
 
     Attributes:
-        alpha_ele: 升降舵表迎角断点，单位 deg。
-        beta_ele: 升降舵表侧滑角断点，单位 deg。
-        stab_ele: 升降舵表平尾偏角断点，单位 deg。
-        elev_bp: 升降舵偏度断点，单位 deg。
-        data_ele: 升降舵增量表。
-        alpha_ail: 副翼表迎角断点，单位 deg。
-        beta_ail: 副翼表侧滑角断点，单位 deg。
-        ail_bp: 副翼偏度断点，单位 deg。
-        data_ail: 副翼增量表。
-        alpha_rud: 方向舵表迎角断点，单位 deg。
-        beta_rud: 方向舵表侧滑角断点，单位 deg。
-        rud_bp: 方向舵偏度断点，单位 deg。
-        data_rud: 方向舵增量表。
-        mode: 襟翼/起落架气动构型名，取 `Mode` 的取值。
         arm_left_out: 左外副翼力臂，单位 m。
         arm_left_in: 左内副翼力臂，单位 m。
         arm_right_in: 右内副翼力臂，单位 m。
         arm_right_out: 右外副翼力臂，单位 m。
-
-    Note:
-        每张表保留 gtm_ad 的轴顺序与以度为单位的作动器断点；四个力臂把当地
-        舵面力折算成滚转/偏航力矩。表字段是气动表缓存（`exclude=True`），
-        不会写入 Pydantic 序列化结果。
     """
 
-    alpha_ele: Any = Field(default=None, exclude=True)
-    beta_ele: Any = Field(default=None, exclude=True)
-    stab_ele: Any = Field(default=None, exclude=True)
-    elev_bp: Any = Field(default=None, exclude=True)
-    data_ele: Any = Field(default=None, exclude=True)
-    alpha_ail: Any = Field(default=None, exclude=True)
-    beta_ail: Any = Field(default=None, exclude=True)
-    ail_bp: Any = Field(default=None, exclude=True)
-    data_ail: Any = Field(default=None, exclude=True)
-    alpha_rud: Any = Field(default=None, exclude=True)
-    beta_rud: Any = Field(default=None, exclude=True)
-    rud_bp: Any = Field(default=None, exclude=True)
-    data_rud: Any = Field(default=None, exclude=True)
-    mode: str = Mode.NORMAL.value
     arm_left_out: float = -0.07
     arm_left_in: float = -0.03
     arm_right_in: float = 0.03
@@ -363,46 +286,15 @@ class ControlSurfacesConfig(BaseModel):
 
 
 class DynamicDerivativesConfig(BaseModel):
-    """Kalviste 角速率分解表与参考长度。
+    """Kalviste 角速率分解使用的参考长度。
 
     Attributes:
         b: 翼展，单位 m，用于归一化 p/r。
         Cbar: 平均气动弦长，单位 m，用于归一化 q。
-        alpha_p: p 表迎角断点，单位 deg。
-        phat_bp: 归一化滚转角速率断点。
-        data_p: p 导数表。
-        alpha_q: q 表迎角断点，单位 deg。
-        qhat_bp: 归一化俯仰角速率断点。
-        data_q: q 导数表。
-        alpha_r: r 表迎角断点，单位 deg。
-        rhat_bp: 归一化偏航角速率断点。
-        data_r: r 导数表。
-        alpha_w: w 表迎角断点，单位 deg。
-        what_bp: 归一化 w 断点。
-        beta_w: w 表侧滑角断点，单位 deg。
-        data_w: w 轴耦合表。
-
-    Note:
-        归一化的 `p/q/r` 贡献分别用翼展 `b` 或平均弦长 `Cbar`；w 轴表带有
-        迎角/侧滑角/角速率的耦合系数。表字段是气动表缓存（`exclude=True`），
-        不会写入 Pydantic 序列化结果。
     """
 
     b: float = 6.0  # Wing span (m).
     Cbar: float = 1.0  # Mean aerodynamic chord (m).
-    alpha_p: Any = Field(default=None, exclude=True)
-    phat_bp: Any = Field(default=None, exclude=True)
-    data_p: Any = Field(default=None, exclude=True)
-    alpha_q: Any = Field(default=None, exclude=True)
-    qhat_bp: Any = Field(default=None, exclude=True)
-    data_q: Any = Field(default=None, exclude=True)
-    alpha_r: Any = Field(default=None, exclude=True)
-    rhat_bp: Any = Field(default=None, exclude=True)
-    data_r: Any = Field(default=None, exclude=True)
-    alpha_w: Any = Field(default=None, exclude=True)
-    what_bp: Any = Field(default=None, exclude=True)
-    beta_w: Any = Field(default=None, exclude=True)
-    data_w: Any = Field(default=None, exclude=True)
 
 
 class AeroForceMomentConfig(BaseModel):
@@ -604,21 +496,18 @@ class AeroConfig(BaseModel):
     Attributes:
         data_path: 可选的 `aero_tables.npz` 路径或其所在目录；为 `None` 时
             使用包内资源。
-        reynolds: 雷诺数查表配置。
-        basic_airframe: 基线气动力/力矩系数表。
-        control_surfaces: 舵面增量表与展向力臂。
-        dynamic_derivatives: Kalviste 动导表与参考长度。
+        tables: 经过校验的冻结气动表资源。
+        control_surfaces: 舵面展向力臂。
+        dynamic_derivatives: Kalviste 动导参考长度。
         force_moment: 参考面积/长度与气动中心偏置。
 
     Note:
-        数组从打包的 `aero_tables.npz` 资源加载，并保存在各表配置的
-        `exclude=True` 字段中，因此系统 JSON 只含资源引用，不重复表数据。
+        `tables` 被排除在配置序列化之外，避免 JSON/TOML 配置复制大型数组。
     """
 
     # Optional aero_tables.npz path or containing directory.
     data_path: str | None = None
-    reynolds: ReynoldsConfig = Field(default_factory=ReynoldsConfig)
-    basic_airframe: BasicAirframeConfig = Field(default_factory=BasicAirframeConfig)
+    tables: AeroTableResources = Field(exclude=True)
     control_surfaces: ControlSurfacesConfig = Field(
         default_factory=ControlSurfacesConfig
     )
@@ -669,9 +558,7 @@ class GTMConfig(BaseModel):
         default_factory=lambda: _build_actuator_config(True)
     )
     aero: AeroConfig = Field(
-        default_factory=lambda: _build_aero_config(
-            _build_aircraft_config(True), Mode.NORMAL
-        )
+        default_factory=lambda: _build_aero_config(_build_aircraft_config(True))
     )
     sensor: SensorConfig = Field(default_factory=lambda: _build_sensor_config(True))
 
@@ -718,7 +605,7 @@ class GTMConfig(BaseModel):
             uncertainty=_build_uncertainty_config(aircraft),
             engine=_build_engine_config(is_fullscale, aircraft),
             actuator=_build_actuator_config(is_fullscale),
-            aero=_build_aero_config(aircraft, mode_value, data_path=data_path),
+            aero=_build_aero_config(aircraft, data_path=data_path),
             sensor=_build_sensor_config(is_fullscale),
         )
 
@@ -742,18 +629,26 @@ class GTMConfig(BaseModel):
             `aircraft` 小节会重新派生发动机、不确定性与气动表配置。
         """
         config_path = Path(path)
-        raw = rtoml.loads(config_path.read_text(encoding="utf-8"))
-        gtm_raw = dict(raw.get("gtm", {}))
+        raw = cast(
+            dict[str, object],
+            rtoml.loads(config_path.read_text(encoding="utf-8")),
+        )
+        gtm_raw = _as_mapping(raw.get("gtm", {}))
         if "trim_model_type" in gtm_raw:
             raise ValueError(
                 "trim_model_type has been removed from fr_gtm; remove it from TOML."
             )
-        mode = _parse_mode(gtm_raw.get("mode", Mode.NORMAL))
+        mode_value = gtm_raw.get("mode", Mode.NORMAL)
+        if not isinstance(mode_value, (Mode, str)):
+            raise TypeError("gtm.mode must be a mode string")
+        mode = _parse_mode(mode_value)
         is_fullscale = bool(gtm_raw.get("is_fullscale", True))
 
-        aero_raw = dict(raw.get("aero", {}))
+        aero_raw = dict(_as_mapping(raw.get("aero", {})))
         data_path = aero_raw.pop("data_path", None)
         if data_path is not None:
+            if not isinstance(data_path, str):
+                raise TypeError("aero.data_path must be a string")
             data_path = Path(data_path)
             if not data_path.is_absolute():
                 data_path = config_path.parent / data_path
@@ -765,29 +660,30 @@ class GTMConfig(BaseModel):
         )
 
         if "aircraft" in raw:
-            cfg.aircraft = _merge_model(cfg.aircraft, raw["aircraft"])
+            cfg.aircraft = _merge_model(cfg.aircraft, _as_mapping(raw["aircraft"]))
             cfg.uncertainty = _build_uncertainty_config(cfg.aircraft)
             cfg.engine = _build_engine_config(cfg.is_fullscale, cfg.aircraft)
             cfg.aero = _build_aero_config(
                 cfg.aircraft,
-                cfg.mode,
                 data_path=cfg.aero.data_path,
             )
 
         if "wind" in raw:
-            cfg.wind = _merge_model(cfg.wind, raw["wind"])
+            cfg.wind = _merge_model(cfg.wind, _as_mapping(raw["wind"]))
         if "ground" in raw:
-            cfg.ground = _merge_model(cfg.ground, raw["ground"])
+            cfg.ground = _merge_model(cfg.ground, _as_mapping(raw["ground"]))
         if "uncertainty" in raw:
-            cfg.uncertainty = _merge_model(cfg.uncertainty, raw["uncertainty"])
+            cfg.uncertainty = _merge_model(
+                cfg.uncertainty, _as_mapping(raw["uncertainty"])
+            )
         if "engine" in raw:
-            cfg.engine = _merge_model(cfg.engine, raw["engine"])
+            cfg.engine = _merge_model(cfg.engine, _as_mapping(raw["engine"]))
         if "actuator" in raw:
-            cfg.actuator = _merge_model(cfg.actuator, raw["actuator"])
+            cfg.actuator = _merge_model(cfg.actuator, _as_mapping(raw["actuator"]))
         if aero_raw:
             cfg.aero = _merge_model(cfg.aero, aero_raw)
         if "sensor" in raw:
-            cfg.sensor = _merge_model(cfg.sensor, raw["sensor"])
+            cfg.sensor = _merge_model(cfg.sensor, _as_mapping(raw["sensor"]))
 
         return cfg
 
@@ -1039,7 +935,6 @@ def _build_sensor_config(is_fullscale: bool) -> SensorConfig:
 
 def _build_aero_config(
     aircraft: AircraftConfig,
-    mode: Mode,
     *,
     data_path: str | Path | None = None,
 ) -> AeroConfig:
@@ -1048,52 +943,11 @@ def _build_aero_config(
 
     return AeroConfig(
         data_path=str(resolved_data_path) if data_path is not None else None,
-        reynolds=ReynoldsConfig(
-            altitude_ft=tables["reynolds"]["altitude_ft"],
-            mach_bp=tables["reynolds"]["mach"],
-            reynolds_values=tables["reynolds"]["reynolds"],
-        ),
-        basic_airframe=BasicAirframeConfig(
-            alpha_c2=tables["C2_bas_Re_dep"]["alpha"],
-            beta_c2=tables["C2_bas_Re_dep"]["beta"],
-            reynolds_c2=tables["C2_bas_Re_dep"]["reynolds"],
-            data_cx_cz=tables["C2_bas_Re_dep"]["data"],
-            alpha_c4=tables["C4_bas_Re_indep"]["alpha"],
-            beta_c4=tables["C4_bas_Re_indep"]["beta"],
-            data_cy_cl_cm_cn=tables["C4_bas_Re_indep"]["data"],
-        ),
-        control_surfaces=ControlSurfacesConfig(
-            alpha_ele=tables["dC3_ele"]["alpha"],
-            beta_ele=tables["dC3_ele"]["beta"],
-            stab_ele=tables["dC3_ele"]["stab"],
-            elev_bp=tables["dC3_ele"]["elev"],
-            data_ele=tables["dC3_ele"]["data"],
-            alpha_ail=tables["dC6_ail"]["alpha"],
-            beta_ail=tables["dC6_ail"]["beta"],
-            ail_bp=tables["dC6_ail"]["ail"],
-            data_ail=tables["dC6_ail"]["data"],
-            alpha_rud=tables["dC6_rud"]["alpha"],
-            beta_rud=tables["dC6_rud"]["beta"],
-            rud_bp=tables["dC6_rud"]["rud"],
-            data_rud=tables["dC6_rud"]["data"],
-            mode=mode.value,
-        ),
+        tables=tables,
+        control_surfaces=ControlSurfacesConfig(),
         dynamic_derivatives=DynamicDerivativesConfig(
             b=aircraft.b,
             Cbar=aircraft.Cbar,
-            alpha_p=tables["dC3_p"]["alpha"],
-            phat_bp=tables["dC3_p"]["phat"],
-            data_p=tables["dC3_p"]["data"],
-            alpha_q=tables["dC3_q"]["alpha"],
-            qhat_bp=tables["dC3_q"]["qhat"],
-            data_q=tables["dC3_q"]["data"],
-            alpha_r=tables["dC3_r"]["alpha"],
-            rhat_bp=tables["dC3_r"]["rhat"],
-            data_r=tables["dC3_r"]["data"],
-            alpha_w=tables["dC6_w"]["alpha"],
-            what_bp=tables["dC6_w"]["what"],
-            beta_w=tables["dC6_w"]["beta"],
-            data_w=tables["dC6_w"]["data"],
         ),
         force_moment=AeroForceMomentConfig(
             Sref=aircraft.S,
@@ -1106,36 +960,16 @@ def _build_aero_config(
     )
 
 
-def _load_aero_tables(data_path: str | Path | None) -> tuple[dict[str, Any], Path]:
+def _load_aero_tables(data_path: str | Path | None) -> tuple[AeroTableResources, Path]:
     if data_path is None:
         resource = resources.files("fr_gtm") / "data" / "aero_tables.npz"
         with resources.as_file(resource) as package_data_path:
-            return _read_aero_tables(package_data_path), package_data_path
+            return load_aero_tables(package_data_path), package_data_path
 
     resolved = Path(data_path)
     if resolved.is_dir():
         resolved /= "aero_tables.npz"
-    return _read_aero_tables(resolved), resolved
-
-
-def _read_aero_tables(data_path: Path) -> dict[str, Any]:
-    groups = {
-        "C2_bas_Re_dep": ("data", "alpha", "beta", "reynolds"),
-        "C4_bas_Re_indep": ("data", "alpha", "beta"),
-        "reynolds": ("reynolds", "altitude_ft", "mach"),
-        "dC3_ele": ("data", "alpha", "beta", "stab", "elev"),
-        "dC6_ail": ("data", "alpha", "beta", "ail"),
-        "dC6_rud": ("data", "alpha", "beta", "rud"),
-        "dC3_p": ("data", "alpha", "phat"),
-        "dC3_q": ("data", "alpha", "qhat"),
-        "dC3_r": ("data", "alpha", "rhat"),
-        "dC6_w": ("data", "alpha", "what", "beta"),
-    }
-    with np.load(data_path, allow_pickle=False) as archive:
-        return {
-            group: {key: archive[f"{group}__{key}"] for key in keys}
-            for group, keys in groups.items()
-        }
+    return load_aero_tables(resolved), resolved
 
 
 def _parse_mode(mode: Mode | str) -> Mode:
@@ -1144,21 +978,27 @@ def _parse_mode(mode: Mode | str) -> Mode:
     return Mode(mode)
 
 
-def _merge_model[T: BaseModel](model: T, updates: dict[str, Any]) -> T:
-    # Use model_fields to get all fields including those with exclude=True,
-    # since pydantic v2 Field(exclude=True) permanently excludes from model_dump.
-    data = {name: getattr(model, name) for name in type(model).model_fields}
+def _as_mapping(value: object) -> Mapping[str, object]:
+    if not isinstance(value, dict):
+        raise TypeError("configuration sections must be TOML tables")
+    return cast(dict[str, object], value)
+
+
+def _merge_model[T: BaseModel](model: T, updates: Mapping[str, object]) -> T:
+    data = cast(dict[str, object], model.model_dump())
     _deep_update(data, updates)
-    return type(model)(**data)
+    if isinstance(model, AeroConfig):
+        data["tables"] = model.tables
+    return type(model).model_validate(data)
 
 
-def _deep_update(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
+def _deep_update(base: dict[str, object], updates: Mapping[str, object]) -> None:
     for key, value in updates.items():
-        if isinstance(value, dict) and isinstance(base.get(key), dict):
-            _deep_update(base[key], value)
+        existing = base.get(key)
+        if isinstance(value, Mapping) and isinstance(existing, dict):
+            _deep_update(existing, value)
         else:
             base[key] = value
-    return base
 
 
 __all__ = [
@@ -1166,13 +1006,11 @@ __all__ = [
     "AeroConfig",
     "AeroForceMomentConfig",
     "AircraftConfig",
-    "BasicAirframeConfig",
     "ControlSurfacesConfig",
     "DynamicDerivativesConfig",
     "EngineConfig",
     "GTMConfig",
     "Mode",
-    "ReynoldsConfig",
     "SensorConfig",
     "SensorSingleConfig",
     "UncertaintyConfig",

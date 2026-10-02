@@ -30,7 +30,7 @@ def WindParams() -> None:
     fr.output("turbulence_level_out", turbulence, dim=(1,))
 
 
-@fr.system
+@fr.system(config=GTMConfig)
 def Wind(cfg: GTMConfig) -> None:
     """组合经风切变修正的稳态风与带门控的 Dryden 湍流。
 

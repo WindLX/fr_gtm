@@ -114,7 +114,7 @@ def _engine_loads(
     return force, moment
 
 
-@fr.block
+@fr.block(config=GTMConfig)
 def Engine(cfg: GTMConfig) -> None:
     """由油门、空速与机体角速率计算双发 FRD 载荷。
 

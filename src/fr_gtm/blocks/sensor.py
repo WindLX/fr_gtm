@@ -8,7 +8,7 @@ from ..constants import FEEDBACK_YDIM
 _DEFAULT_CONFIG = SensorConfig()
 
 
-@fr.block
+@fr.block(config=SensorConfig)
 def Sensor(cfg: SensorConfig = _DEFAULT_CONFIG) -> None:
     """组装 17 个物理反馈通道并施加传感器误差。
 

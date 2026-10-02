@@ -5,7 +5,7 @@ import fly_ruler_core as fr
 from ..config import GTMConfig
 
 
-@fr.block
+@fr.block(config=GTMConfig)
 def Mass(cfg: GTMConfig) -> None:
     """对重量与六个惯量分量施加相对不确定性。
 

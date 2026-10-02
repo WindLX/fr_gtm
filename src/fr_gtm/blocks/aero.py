@@ -51,18 +51,18 @@ def _uncertainty_scales(
 
 
 def _reynolds(cfg: GTMConfig, altitude: Signal, mach: Signal) -> Signal:
-    table_cfg = cfg.aero.reynolds
-    reynolds_values = np.asarray(table_cfg.reynolds_values)
+    table_cfg = cfg.aero.tables.reynolds
+    reynolds_values = table_cfg.values
     # gtm_ad flattens this MATLAB table in Fortran order before the backend
     # reshapes it on the regular grid. Preserve that exact orientation.
     reynolds_values = reynolds_values.flatten(order="F").reshape(
-        len(table_cfg.altitude_ft), len(table_cfg.mach_bp)
+        len(table_cfg.altitude_ft), len(table_cfg.mach)
     )
     table = fr.resource.interpolator(
         "reynolds",
         grid_points=[
             np.asarray(table_cfg.altitude_ft),
-            np.asarray(table_cfg.mach_bp),
+            table_cfg.mach,
         ],
         values=reynolds_values,
         method="linear",
@@ -77,22 +77,22 @@ def _basic_coefficients(
     reynolds: Signal,
     scale: Signal,
 ) -> Signal:
-    basic = cfg.aero.basic_airframe
+    basic = cfg.aero.tables.basic_airframe
     cx_cz = fr.resource.interpolator(
         "basic_cx_cz",
         grid_points=[
-            np.asarray(basic.alpha_c2),
-            np.asarray(basic.beta_c2),
-            np.asarray(basic.reynolds_c2),
+            basic.alpha_c2,
+            basic.beta_c2,
+            basic.reynolds_c2,
         ],
-        values=np.asarray(basic.data_cx_cz),
+        values=basic.cx_cz,
         method="linear",
         n_out=2,
     )(alpha, beta, reynolds)
     lateral = fr.resource.interpolator(
         "basic_cy_cl_cm_cn",
-        grid_points=[np.asarray(basic.alpha_c4), np.asarray(basic.beta_c4)],
-        values=np.asarray(basic.data_cy_cl_cm_cn),
+        grid_points=[basic.alpha_c4, basic.beta_c4],
+        values=basic.cy_cl_cm_cn,
         method="linear",
         n_out=4,
     )(alpha, beta)
@@ -150,38 +150,38 @@ def _control_coefficients(
     c_a: Signal,
     c_r: Signal,
 ) -> Signal:
-    control = cfg.aero.control_surfaces
+    control = cfg.aero.tables.control_surfaces
     elevator_table = fr.resource.interpolator(
         "elevator",
         grid_points=[
-            np.asarray(control.alpha_ele),
-            np.asarray(control.beta_ele),
-            np.asarray(control.stab_ele),
-            np.asarray(control.elev_bp),
+            control.alpha_elevator,
+            control.beta_elevator,
+            control.stabilizer,
+            control.elevator,
         ],
-        values=np.asarray(control.data_ele),
+        values=control.elevator_data,
         method="linear",
         n_out=3,
     )
     aileron_table = fr.resource.interpolator(
         "aileron",
         grid_points=[
-            np.asarray(control.alpha_ail),
-            np.asarray(control.beta_ail),
-            np.asarray(control.ail_bp),
+            control.alpha_aileron,
+            control.beta_aileron,
+            control.aileron,
         ],
-        values=np.asarray(control.data_ail),
+        values=control.aileron_data,
         method="linear",
         n_out=6,
     )
     rudder_table = fr.resource.interpolator(
         "rudder",
         grid_points=[
-            np.asarray(control.alpha_rud),
-            np.asarray(control.beta_rud),
-            np.asarray(control.rud_bp),
+            control.alpha_rudder,
+            control.beta_rudder,
+            control.rudder,
         ],
-        values=np.asarray(control.data_rud),
+        values=control.rudder_data,
         method="linear",
         n_out=6,
     )
@@ -289,42 +289,43 @@ def _dynamic_coefficients(
     tas: Signal,
     pqr: Signal,
 ) -> Signal:
-    dynamic = cfg.aero.dynamic_derivatives
+    dynamic = cfg.aero.tables.dynamic_derivatives
     p_table = fr.resource.interpolator(
         "dynamic_p",
-        grid_points=[np.asarray(dynamic.alpha_p), np.asarray(dynamic.phat_bp)],
-        values=np.asarray(dynamic.data_p),
+        grid_points=[dynamic.alpha_p, dynamic.phat],
+        values=dynamic.p,
         method="linear",
         n_out=3,
     )
     q_table = fr.resource.interpolator(
         "dynamic_q",
-        grid_points=[np.asarray(dynamic.alpha_q), np.asarray(dynamic.qhat_bp)],
-        values=np.asarray(dynamic.data_q),
+        grid_points=[dynamic.alpha_q, dynamic.qhat],
+        values=dynamic.q,
         method="linear",
         n_out=3,
     )
     r_table = fr.resource.interpolator(
         "dynamic_r",
-        grid_points=[np.asarray(dynamic.alpha_r), np.asarray(dynamic.rhat_bp)],
-        values=np.asarray(dynamic.data_r),
+        grid_points=[dynamic.alpha_r, dynamic.rhat],
+        values=dynamic.r,
         method="linear",
         n_out=3,
     )
     w_table = fr.resource.interpolator(
         "dynamic_w",
         grid_points=[
-            np.asarray(dynamic.alpha_w),
-            np.asarray(dynamic.what_bp),
-            np.asarray(dynamic.beta_w),
+            dynamic.alpha_w,
+            dynamic.what,
+            dynamic.beta_w,
         ],
-        values=np.asarray(dynamic.data_w),
+        values=dynamic.w,
         method="linear",
         n_out=6,
     )
 
     safe_tas = fr.math.clip(tas, 1.0, 10000.0)
-    omega, oscillatory = _hykal(alpha, beta, safe_tas, pqr, dynamic.b, dynamic.Cbar)
+    lengths = cfg.aero.dynamic_derivatives
+    omega, oscillatory = _hykal(alpha, beta, safe_tas, pqr, lengths.b, lengths.Cbar)
     omega = fr.math.clip(omega, -0.5, 0.5)
     p_delta = p_table(alpha, oscillatory[0])
     q_delta = q_table(alpha, oscillatory[1])
@@ -404,7 +405,7 @@ def aerodynamic_loads(
     return AeroResult(coefficients, force, moment, reynolds)
 
 
-@fr.block
+@fr.block(config=GTMConfig)
 def Aero(cfg: GTMConfig) -> None:
     """计算相对气流空速与 GTM 气动力/力矩。
 

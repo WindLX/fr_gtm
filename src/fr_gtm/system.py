@@ -6,8 +6,6 @@ GTM 特有的表格与符号约定留在各自的 Block 内，标准库负责作
 
 from __future__ import annotations
 
-from typing import Any, cast
-
 import fly_ruler_core as fr
 import numpy as np
 from fly_ruler_std.blocks.actuator import SimpleActuator, SimpleActuatorConfig
@@ -25,7 +23,7 @@ from .config import GTMConfig
 _DEFAULT_CONFIG = GTMConfig.default()
 
 
-@fr.system
+@fr.system(config=GTMConfig)
 def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
     """组装 25 状态 GTM 被控对象与固定 21 通道观测。
 
@@ -63,7 +61,7 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
             expose_params=False,
         ),
     )
-    wind = cast(Any, Wind("wind", cfg))
+    wind = Wind("wind", cfg)
     mass = Mass("mass", cfg)
     aero = Aero("aero", cfg)
     engine = Engine("engine", cfg)
@@ -198,8 +196,8 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
         )
 
 
-def build_initial_state(
-    model: fr.CompiledModel[Any],
+def build_initial_state[ArrayT](
+    model: fr.CompiledModel[ArrayT],
     cfg: GTMConfig = _DEFAULT_CONFIG,
 ) -> np.ndarray:
     """用完整路径构建默认的 25 元物理初始状态。
@@ -216,7 +214,7 @@ def build_initial_state(
         默认为机体系 50 m/s 前向速度，姿态与角速率为零，位置在 NED 原点。
     """
     del cfg
-    return np.asarray(
+    return model.to_numpy(
         model.x.build(
             {
                 "Root.eom::pos_ned": np.zeros(3),
@@ -231,13 +229,12 @@ def build_initial_state(
                 "Root.wind.dryden::q_gw": np.zeros(1),
                 "Root.wind.dryden::r_gw": np.zeros(1),
             }
-        ),
-        dtype=float,
+        )
     )
 
 
-def build_ground_initial_state(
-    model: fr.CompiledModel[Any],
+def build_ground_initial_state[ArrayT](
+    model: fr.CompiledModel[ArrayT],
     cfg: GTMConfig,
     *,
     forward_speed_mps: float = 0.0,
@@ -294,7 +291,7 @@ def build_ground_initial_state(
         ]
     )
     velocity_body = dcm.T @ np.array([forward_speed_mps, 0.0, sink_rate_mps])
-    return np.asarray(
+    return model.to_numpy(
         model.x.build(
             {
                 "Root.eom::pos_ned": np.array([0.0, 0.0, down]),
@@ -309,6 +306,5 @@ def build_ground_initial_state(
                 "Root.wind.dryden::q_gw": np.zeros(1),
                 "Root.wind.dryden::r_gw": np.zeros(1),
             }
-        ),
-        dtype=float,
+        )
     )
