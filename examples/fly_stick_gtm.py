@@ -400,13 +400,7 @@ async def _open_stick(args: Options) -> tuple[Any | None, Any | None]:
         device_descs={args.logical_name: desc},
         debounce_seconds=0.02,
     )
-    devices = await pool.reset()
-    if args.logical_name not in devices:
-        await pool.stop()
-        raise RuntimeError(
-            f"No input device matched profile '{args.profile}'. "
-            "Check the profile or run with --no-stick for dry testing."
-        )
+    await pool.reset()
     return pool, desc
 
 
