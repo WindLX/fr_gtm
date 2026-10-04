@@ -29,7 +29,8 @@ def _engine_loads(
 
     Args:
         cfg: GTM 配置，提供发动机多项式、安装位置/方向与参考面积。
-        effective_throttle: 二阶滞后后的有效油门百分比，单位 %，范围 [0, 100]。
+        effective_throttle: 二阶滞后后的有效油门百分比，单位 %；瞬态可超出
+            指令的 [0, 100] 范围，不在此处裁剪。
         omega_body: 机体系角速率，单位 rad/s，用于转子陀螺力矩。
         pressure_ratio: 当地静压与海平面静压之比，无量纲。
         qbar: 动压，单位 Pa，用于冲压阻力。

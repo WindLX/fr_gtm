@@ -58,7 +58,7 @@ def _engine_only(time_scale: float) -> tuple[GTMConfig, Any]:
         omega_body >> engine.omega_body
         pressure_ratio >> engine.pressure_ratio
         qbar >> engine.qbar
-        fr.export(effective_throttle=engine.effective_throttle)
+        fr.export(effective_throttle=engine.effective_throttle, force=engine.force)
 
     builder = EngineOnly.build("EngineOnly")
     model = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=_DT)).compile(
@@ -140,6 +140,48 @@ def test_analytic_step_matches_numerical_integration() -> None:
         assert simulated[t] == pytest.approx(
             analytic[t], rel=_ANALYTIC_RTOL, abs=1.0e-9
         )
+
+
+@pytest.mark.parametrize("fullscale", [False, True])
+def test_default_lag_matches_original_jetcat_matrices(fullscale: bool) -> None:
+    """独立固定原始 SLX 左右 Jetcat P70 Mask 的系数，不从当前配置推导参考。"""
+    lag = GTMConfig.default(fullscale).engine.lag
+    np.testing.assert_array_equal(lag.state_matrix, [-1.336, -0.7314, 1.0, 0.0])
+    np.testing.assert_array_equal(lag.input_matrix, [1.0, 0.0])
+    np.testing.assert_array_equal(lag.output_matrix, [-0.1474, 0.7314])
+    assert lag.time_scale == 1.0
+    np.testing.assert_allclose(lag.trim_state(40.0), [0.0, 40.0 / 0.7314])
+
+
+def test_command_changes_rates_without_direct_feedthrough_into_loads() -> None:
+    """固定内部状态时指令只改变导数，推力读取未裁切的有效油门。"""
+    _, model = _engine_only(1.0)
+    state = np.array([10.0, 0.0])
+    x = model.x.build({"Root.engine::lag_state": state})
+    previous_force: np.ndarray | None = None
+    for command in (-50.0, 25.0, 150.0):
+        u = model.u.build(
+            {
+                "Root::throttle_command": [command],
+                "Root::omega_body": np.zeros(3),
+                "Root::pressure_ratio": [1.0],
+                "Root::qbar": [0.0],
+            }
+        )
+        rates, _, y, _ = model.continuous_fn(
+            0.0, x, model.xd.build(), u, model.p.build()
+        )
+        outputs = model.y.read(y, by="path")
+        np.testing.assert_allclose(outputs["Root::effective_throttle"], [-1.474])
+        np.testing.assert_allclose(
+            model.xdot.read(rates, by="path")["Root.engine::lag_state"],
+            [-13.36 + np.clip(command, 0.0, 100.0), 10.0],
+        )
+        force = np.asarray(outputs["Root::force"])
+        assert force[0] >= 0.0
+        if previous_force is not None:
+            np.testing.assert_array_equal(force, previous_force)
+        previous_force = force.copy()
 
 
 def test_second_order_crossing_times_match_documented_response() -> None:
