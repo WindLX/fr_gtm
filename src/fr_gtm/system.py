@@ -255,7 +255,7 @@ def build_initial_state[ArrayT](
                 "Root.wind.dryden::r_gw": np.zeros(1),
             }
         )
-    )
+    ).reshape(-1)
 
 
 def build_ground_initial_state[ArrayT](
@@ -337,4 +337,4 @@ def build_ground_initial_state[ArrayT](
                 "Root.wind.dryden::r_gw": np.zeros(1),
             }
         )
-    )
+    ).reshape(-1)

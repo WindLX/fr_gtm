@@ -55,8 +55,8 @@ def _run(
         )
     # #endregion 02-state-input-1
     # 显式转成 float 数组，避免不同后端返回类型在循环里混用。
-    xd = np.asarray(model.xd.build(), dtype=float)
-    p = np.asarray(model.p.default(), dtype=float)
+    xd = model.to_numpy(model.xd.build())
+    p = model.to_numpy(model.p.default())
     recorder = Recorder(model, output_dir)
     y: np.ndarray | None = None
     steps = max(1, round(duration / dt))
@@ -64,31 +64,30 @@ def _run(
     # touchdown 保持零升降舵与 25% 油门；这样可以复现一条确定的跑道轨迹。
     for step in range(steps):
         velocity = model.x.read(x, by="path")["Root.eom::vel_body"]
-        speed = float(np.linalg.norm(np.asarray(velocity, dtype=float)))
+        speed = float(np.linalg.norm(model.to_numpy(velocity)))
         command = (
             np.array([-5.0 if speed >= 65.0 else 0.0, 0.0, 0.0, 100.0])
             if scenario == "takeoff"
             else np.array([0.0, 0.0, 0.0, 25.0])
         )
-        u = np.asarray(
+        u = model.to_numpy(
             model.u.build(
                 {
                     "Root::u": command,
                     "Root::d": np.zeros(4),
                     "Root::n": np.zeros(21),
                 }
-            ),
-            dtype=float,
+            )
         )
         discrete = model.discrete_fn
         if discrete is None:
             raise RuntimeError("model has no discrete function")
         # 一步推进后用 reshape(-1) 抹平后端差异，再把状态与代数量写入记录器。
         x_next, xd_next, y_next, effects_next = discrete(step * dt, x, xd, u, p)
-        x = np.asarray(x_next, dtype=float).reshape(-1)
-        xd = np.asarray(xd_next, dtype=float).reshape(-1)
-        y = np.asarray(y_next, dtype=float).reshape(-1)
-        effects = np.asarray(effects_next, dtype=float).reshape(-1)
+        x = model.to_numpy(x_next).reshape(-1)
+        xd = model.to_numpy(xd_next).reshape(-1)
+        y = model.to_numpy(y_next).reshape(-1)
+        effects = model.to_numpy(effects_next).reshape(-1)
         recorder.record(
             step, (step + 1) * dt, x=x, xd=xd, y=y, u=u, p=p, effect=effects
         )
@@ -98,10 +97,8 @@ def _run(
     # 开启地面接触后输出里才有地面诊断通道，这里取高度与三个接地点的法向力。
     outputs = model.y.read(y, by="path")
     print(f"saved: {output_dir / f'{scenario}.parquet'}")
-    altitude = float(np.asarray(outputs["Root::altitude"], dtype=float).reshape(-1)[0])
-    wheel_loads = np.asarray(
-        outputs["Root::ground_normal_forces"], dtype=float
-    ).reshape(-1)
+    altitude = float(model.to_numpy(outputs["Root::altitude"]).reshape(-1)[0])
+    wheel_loads = model.to_numpy(outputs["Root::ground_normal_forces"]).reshape(-1)
     print(f"final altitude: {altitude:.3f} m")
     print("wheel loads:", wheel_loads)
 
@@ -110,7 +107,7 @@ def main(
     scenario: Annotated[str, typer.Option(help="takeoff or touchdown")] = "takeoff",
     backend: Annotated[
         str, typer.Option(help="numpy, casadi, jax, or native")
-    ] = "numpy",
+    ] = "casadi",
     duration: Annotated[float, typer.Option(min=0.001)] = 8.0,
     dt: Annotated[float, typer.Option(min=0.0001)] = 0.01,
     output_dir: Annotated[Path, typer.Option()] = Path("results/gtm_ground"),

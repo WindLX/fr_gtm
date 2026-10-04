@@ -28,11 +28,11 @@ from fr_gtm import GTMConfig, GTMSystem
 def main() -> None:
     """用默认配置推进一步长为 100 步的标称仿真并落盘。"""
     # #region 01-build-1
-    # 默认配置为全尺寸、NORMAL 构型且关闭地面接触；编译到 NumPy 后端。
+    # 默认配置为全尺寸、NORMAL 构型且关闭地面接触；编译到 CasADi 后端。
     cfg = GTMConfig.default()
     builder = GTMSystem.build("Root", cfg)
     model = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=0.01)).compile(
-        builder, target=fr.targets.numpy
+        builder, target=fr.targets.casadi
     )
     # #endregion 01-build-1
     # #region 02-state-input-1
@@ -87,10 +87,11 @@ def main() -> None:
     # 按完整路径回读末态输出，高度与空速取自 21 通道 y 的对应分量。
     final = model.y.read(y, by="path")
     print(f"saved: {output_dir / 'nominal.parquet'}")
-    print(f"final altitude: {final['Root::altitude'][0]:.3f} m")
+    altitude = model.to_numpy(final["Root::altitude"]).reshape(-1)[0]
+    print(f"final altitude: {altitude:.3f} m")
     # #endregion 03-simulate-2
     # #endregion 03-simulate-1
-    print(f"final airspeed: {final['Root::V'][0]:.3f} m/s")
+    print(f"final airspeed: {model.to_numpy(final['Root::V']).reshape(-1)[0]:.3f} m/s")
 
 
 # #endregion gtm-1

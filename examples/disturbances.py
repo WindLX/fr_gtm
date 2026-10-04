@@ -26,7 +26,7 @@ def main() -> None:
     cfg = GTMConfig.default()
     builder = GTMSystem.build("Root", cfg)
     model = fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
-        builder, target=fr.targets.numpy
+        builder, target=fr.targets.casadi
     )
     # #region 04-scenarios-1
     # 状态里额外给出 Dryden 阵风初值：u_gw 为 1 维，v_gw 与 w_gw 各 2 维，
@@ -68,12 +68,13 @@ def main() -> None:
     # 只求一次连续输出：clean_y 为未经传感器噪声的真值，y 叠加了噪声与偏置。
     _, _, y, _ = model.continuous_fn(0.0, x, model.xd.build(), u, p)
     output = model.y.read(y, by="path")
-    print(f"body wind:  {output['Root::uvw']}")
+    print(f"body wind:  {model.to_numpy(output['Root::uvw'])}")
     print(
-        f"alpha/beta: {output['Root::alpha'][0]:.3f}, {output['Root::beta'][0]:.3f} deg"
+        f"alpha/beta: {model.to_numpy(output['Root::alpha']).reshape(-1)[0]:.3f}, "
+        f"{model.to_numpy(output['Root::beta']).reshape(-1)[0]:.3f} deg"
     )
-    print(f"clean y[:5]: {output['Root::clean_y'][:5]}")
-    print(f"noisy y[:5]: {output['Root::y'][:5]}")
+    print(f"clean y[:5]: {model.to_numpy(output['Root::clean_y']).reshape(-1)[:5]}")
+    print(f"noisy y[:5]: {model.to_numpy(output['Root::y']).reshape(-1)[:5]}")
 
 
 # #endregion 03-simulate-1

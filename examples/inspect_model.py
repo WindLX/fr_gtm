@@ -1,6 +1,6 @@
 """导出 GTM 拓扑、生成源码与向量布局。
 
-主题：编译一次 NumPy 模型，打印编译产物目录、系统 IR、后端源码与布局文件的路径，
+主题：编译一次 CasADi 模型，打印编译产物目录、系统 IR、后端源码与布局文件的路径，
 再给出各向量空间的大小与完整路径清单，便于对照文档检查模型接口。
 
 运行：
@@ -22,7 +22,7 @@ from fr_gtm import GTMConfig, GTMSystem
 
 
 def main() -> None:
-    """编译 NumPy 目标并打印产物路径、向量尺寸与路径清单。"""
+    """编译 CasADi 目标并打印产物路径、向量尺寸与路径清单。"""
     # builder 只描述系统连接关系，编译阶段才把它降为后端代码与布局。
     root = Path(__file__).resolve().parent.parent
     builder = GTMSystem.build("Root", GTMConfig.default())
@@ -33,7 +33,7 @@ def main() -> None:
             dt=0.01,
             artifact_dir=root / "build" / "flyruler",
         )
-    ).compile(builder, target=fr.targets.numpy)
+    ).compile(builder, target=fr.targets.casadi)
     assert model.artifact is not None
 
     # artifact.path 是产物根目录，file() 按类别取具体文件；cache_hit 说明是否复用缓存。
