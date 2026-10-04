@@ -16,7 +16,7 @@ def Sensor(cfg: SensorConfig = _DEFAULT_CONFIG) -> None:
         cfg: 各传感器通道的偏置、比例与白噪声标准差，顺序与反馈向量一致。
 
     Note:
-        历史 GTM 观测会在末尾追加四个作动器指令遥测值，这些值由 `fr_gtm.system`
+        历史 GTM 观测会在末尾追加四个指令遥测值，这些值由 `fr_gtm.system`
         在本 Block 之外拼接。把指令输入排除在物理传感器之外，才使
         `feedback_y` 成为适合内部闭环控制的因果信号。气动角、欧拉姿态与
         机体角速率按冻结的 gtm_ad 布局以度输出，而动力学内部使用弧度。

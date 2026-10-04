@@ -10,8 +10,8 @@
 预期结果：打印 artifact、topology、source、layout、cache 与六个尺寸，随后按 x、u、y
 分别列出完整路径。cache 首次多为 miss，产物已存在时为 hit。
 
-说明：本示例只读编译产物、不推进仿真；默认全尺寸 NORMAL 构型下 n_x=25、n_xdot=24、
-n_xd=0、n_u=29、n_p=33、n_y=140，其中 xdot 比 x 少一维是因为四元数按 SO3 切空间求导。
+说明：本示例只读编译产物、不推进仿真；默认全尺寸 NORMAL 构型下 n_x=26、n_xdot=25、
+n_xd=0、n_u=29、n_p=33、n_y=144，其中 xdot 比 x 少一维是因为四元数按 SO3 切空间求导。
 """
 
 from pathlib import Path

@@ -12,6 +12,9 @@ from fr_gtm import GTMConfig, GTMSystem, Mode
 
 REFERENCE = np.load(Path(__file__).parent / "data" / "gtm_reference.npz")
 CASE_NAMES = REFERENCE["name"].tolist()
+# 冻结参考把油门建为一阶作动器状态，本模型把油门换成二阶滞后；两侧共用同一份
+# 滞后动态，因此这里用默认配置的滞后参数把参考的油门状态换算成滞后状态。
+LAG = GTMConfig.default().engine.lag
 
 
 @lru_cache(maxsize=None)
@@ -32,7 +35,10 @@ def _state(model: fr.CompiledModel[Any], x: np.ndarray) -> np.ndarray:
                 "Root.eom::vel_body": x[3:6],
                 "Root.eom::quat": x[6:10],
                 "Root.eom::omega_body": x[10:13],
-                "Root.actuator::position": x[13:17],
+                "Root.actuator::position": x[13:16],
+                # 参考的第 17 个状态是有效油门；本模型的内部状态由它做配平反解，
+                # 这样有效油门初值与参考一致，力与力矩在 t=0 完全对得上。
+                "Root.engine::lag_state": np.asarray(LAG.trim_state(x[16])),
                 "Root.wind.dryden::u_gw": x[17:18],
                 "Root.wind.dryden::v_gw": x[18:20],
                 "Root.wind.dryden::w_gw": x[20:22],
@@ -66,10 +72,12 @@ def _parameters(model: fr.CompiledModel[Any], p: np.ndarray) -> np.ndarray:
     )
 
 
-def _reference_xdot(
+def _reference_xdot_head(
     derivatives: dict[str, np.ndarray],
     outputs: dict[str, np.ndarray],
 ) -> np.ndarray:
+    """拼出参考布局中油门通道之前的 16 个导数分量。"""
+
     return np.concatenate(
         [
             derivatives["Root.eom::pos_ned"],
@@ -77,6 +85,15 @@ def _reference_xdot(
             outputs["quat_dot_reference"],
             derivatives["Root.eom::omega_body"],
             derivatives["Root.actuator::position"],
+        ]
+    )
+
+
+def _reference_xdot_tail(derivatives: dict[str, np.ndarray]) -> np.ndarray:
+    """拼出参考布局中油门通道之后的 8 个 Dryden 导数分量。"""
+
+    return np.concatenate(
+        [
             derivatives["Root.wind.dryden::u_gw"],
             derivatives["Root.wind.dryden::v_gw"],
             derivatives["Root.wind.dryden::w_gw"],
@@ -111,9 +128,21 @@ def test_matches_frozen_gtm_ad_reference(index: int) -> None:
     derivatives = model.xdot.read(xdot, by="path")
     outputs = model.y.read(y)
 
+    # 冻结参考的第 16 槽是油门作动器（一阶）的导数，本模型是二阶滞后的有效油门
+    # 导数，两者定义不同，因此这一槽不参与比对，改用配平反解的解析式独立核对：
+    # 由 A x_e = -B x[16] 得 xdot_e = B (u[3] - x[16]) / c。
+    head = _reference_xdot_head(derivatives, outputs)
+    tail = _reference_xdot_tail(derivatives)
+    xdot_reference = REFERENCE["xdot"][index]
+    np.testing.assert_allclose(head, xdot_reference[0:16], rtol=1e-8, atol=1e-9)
+    np.testing.assert_allclose(tail, xdot_reference[17:25], rtol=1e-8, atol=1e-9)
+    throttle_delta = float(REFERENCE["u"][index][3] - REFERENCE["x"][index][16])
     np.testing.assert_allclose(
-        _reference_xdot(derivatives, outputs),
-        REFERENCE["xdot"][index],
+        derivatives["Root.engine::lag_state"],
+        [
+            LAG.input_matrix[0] * throttle_delta / LAG.time_scale,
+            LAG.input_matrix[1] * throttle_delta / LAG.time_scale,
+        ],
         rtol=1e-8,
         atol=1e-9,
     )

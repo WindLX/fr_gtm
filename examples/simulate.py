@@ -11,7 +11,8 @@
 产物落在 `models/fr_gtm/results/gtm_nominal/` 下。
 
 约定：位置取世界系 NED，高度为 -pos_ned[2]；速度在机体系 FRD，姿态四元数为
-scalar-first；作动器位置为 [升降舵, 副翼, 方向舵, 油门]，角度单位为度、油门为百分比。
+scalar-first；三个舵面位置为 [升降舵, 副翼, 方向舵]（度），油门指令为百分比、
+先进 `Engine` 的二阶滞后再成为有效油门。
 """
 
 from pathlib import Path
@@ -28,20 +29,23 @@ def main() -> None:
     """用默认配置推进一步长为 100 步的标称仿真并落盘。"""
     # #region 01-build-1
     # 默认配置为全尺寸、NORMAL 构型且关闭地面接触；编译到 NumPy 后端。
-    builder = GTMSystem.build("Root", GTMConfig.default())
+    cfg = GTMConfig.default()
+    builder = GTMSystem.build("Root", cfg)
     model = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=0.01)).compile(
         builder, target=fr.targets.numpy
     )
     # #endregion 01-build-1
     # #region 02-state-input-1
     # 状态用完整路径装配：NED 下向 -1000 即 1000 m 高度，速度在机体系 FRD。
-    # 作动器位置与输入指令一致，四元素依次为升降舵、副翼、方向舵与油门百分比。
+    # 作动器位置与输入指令一致，三元素依次为升降舵、副翼与方向舵；发动机的
+    # 二阶滞后状态取 40% 油门对应的配平值，避免起点出现人为推力暂态。
     x = model.x.build(
         {
             "Root.eom::pos_ned": [0.0, 0.0, -1000.0],
             "Root.eom::vel_body": [100.0, 0.0, 0.0],
             "Root.eom::quat": [1.0, 0.0, 0.0, 0.0],
-            "Root.actuator::position": [0.0, 0.0, 0.0, 40.0],
+            "Root.actuator::position": [0.0, 0.0, 0.0],
+            "Root.engine::lag_state": cfg.engine.lag.trim_state(40.0),
         }
     )
     u = model.u.build(

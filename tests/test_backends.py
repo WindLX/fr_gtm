@@ -14,6 +14,9 @@ BACKEND_REFERENCE = np.load(
     allow_pickle=True,
 )
 TRAJECTORY_BACKENDS = ("numpy", "casadi", "native", "jax")
+# 冻结轨迹的油门指令恒为 40%，参考的油门状态也恒为 40%；本模型用同一配平值
+# 初始化二阶滞后，因此整条轨迹仍应与参考一致。
+LAG = GTMConfig.default().engine.lag
 
 
 def _builder(*, enable_ground: bool = False) -> fr.PyIrBuilder:
@@ -37,7 +40,8 @@ def _state(model: Any, x: np.ndarray) -> np.ndarray:
                 "Root.eom::vel_body": x[3:6],
                 "Root.eom::quat": x[6:10],
                 "Root.eom::omega_body": x[10:13],
-                "Root.actuator::position": x[13:17],
+                "Root.actuator::position": x[13:16],
+                "Root.engine::lag_state": np.asarray(LAG.trim_state(x[16])),
                 "Root.wind.dryden::u_gw": x[17:18],
                 "Root.wind.dryden::v_gw": x[18:20],
                 "Root.wind.dryden::w_gw": x[20:22],
@@ -182,7 +186,8 @@ def test_casadi_matches_numpy() -> None:
             "Root.eom::pos_ned": [0.0, 0.0, -1000.0],
             "Root.eom::vel_body": [100.0, 0.0, 5.0],
             "Root.eom::quat": [1.0, 0.0, 0.0, 0.0],
-            "Root.actuator::position": [-2.0, 1.0, 0.0, 40.0],
+            "Root.actuator::position": [-2.0, 1.0, 0.0],
+            "Root.engine::lag_state": np.asarray(LAG.trim_state(40.0)),
         }
     )
     u = numpy_model.u.build(

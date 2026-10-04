@@ -52,7 +52,7 @@ def test_system_level_control_effectiveness_query_resolves_through_plant() -> No
         noise >> plant.n
         effectiveness = fr.jacobian(
             output=plant.moment_aero,
-            wrt=plant.actuator_position,
+            wrt=plant.surface_position,
             name="control_effectiveness",
         )
         fr.export(control_effectiveness=effectiveness)
@@ -62,15 +62,15 @@ def test_system_level_control_effectiveness_query_resolves_through_plant() -> No
     assert len(plan.jacobian_plans) == 1
     query = plan.jacobian_plans[0]
     assert query.output_path == "Root.plant::moment_aero"
-    assert query.wrt_path == "Root.plant::actuator_position"
+    assert query.wrt_path == "Root.plant::surface_position"
     assert query.output_shape == [3]
-    assert query.wrt_shape == [4]
+    assert query.wrt_shape == [3]
 
 
 def test_layout_and_full_paths() -> None:
     model = _compile()
-    assert model.n_x == 25
-    assert model.n_xdot == 24
+    assert model.n_x == 26
+    assert model.n_xdot == 25
     assert model.n_p == 33
     assert "Root.eom::quat" in model.x.keys
     assert "Root.wind.dryden::w_gw" in model.x.keys
@@ -90,7 +90,7 @@ def test_initial_state_and_outputs_are_finite() -> None:
     )
     xdot, _, y, _ = model.continuous_fn(0.0, x, model.xd.build(), u, model.p.build())
     outputs = model.y.read(y)
-    assert x.shape == (25,)
+    assert x.shape == (26,)
     assert np.isfinite(xdot).all()
     assert np.isfinite(outputs["y"]).all()
     assert outputs["clean_y"].shape == (21,)
@@ -165,7 +165,7 @@ def test_optional_ground_contact_layout_and_static_support(
 ) -> None:
     cfg = GTMConfig.default(is_fullscale, enable_ground=True)
     model = _compile(cfg)
-    assert model.n_x == 25
+    assert model.n_x == 26
     assert model.n_u == 29
     assert model.n_p == 34
     assert "Root.ground.params::ground_down" in model.p.keys
@@ -283,15 +283,19 @@ def _engine_block_moment(cfg: GTMConfig) -> np.ndarray:
     @fr.system
     def EngineOnly() -> None:
         engine = Engine("engine", cfg)
-        actuators = fr.input("actuators", (4,))
+        throttle_command = fr.input("throttle_command", (1,))
         omega_body = fr.input("omega_body", (3,))
         pressure_ratio = fr.input("pressure_ratio", (1,))
         qbar = fr.input("qbar", (1,))
-        actuators >> engine.actuators
+        throttle_command >> engine.throttle_command
         omega_body >> engine.omega_body
         pressure_ratio >> engine.pressure_ratio
         qbar >> engine.qbar
-        fr.export(engine_force=engine.force, engine_moment=engine.moment)
+        fr.export(
+            engine_force=engine.force,
+            engine_moment=engine.moment,
+            effective_throttle=engine.effective_throttle,
+        )
 
     builder = EngineOnly.build("EngineOnly")
     model = fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
@@ -299,16 +303,20 @@ def _engine_block_moment(cfg: GTMConfig) -> np.ndarray:
     )
     u = model.u.build(
         {
-            "Root::actuators": np.array([0.0, 0.0, 0.0, 60.0]),
+            "Root::throttle_command": np.array([60.0]),
             "Root::omega_body": np.zeros(3),
             "Root::pressure_ratio": np.ones(1),
             "Root::qbar": np.array([1000.0]),
         }
     )
-    _, _, y, _ = model.continuous_fn(
-        0.0, model.x.build(), model.xd.build(), u, model.p.build()
+    # 60% 指令对应的滞后配平状态，使有效油门正好是 60% 而不是从零开始爬升。
+    x = model.x.build(
+        {"Root.engine::lag_state": np.asarray(cfg.engine.lag.trim_state(60.0))}
     )
-    return np.asarray(model.y.read(y, by="path")["Root::engine_moment"])
+    _, _, y, _ = model.continuous_fn(0.0, x, model.xd.build(), u, model.p.build())
+    outputs = model.y.read(y, by="path")
+    np.testing.assert_allclose(outputs["Root::effective_throttle"], [60.0], atol=1.0e-9)
+    return np.asarray(outputs["Root::engine_moment"])
 
 
 def test_engine_block_uses_engine_config_cg_pos() -> None:

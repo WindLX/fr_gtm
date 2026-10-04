@@ -118,7 +118,7 @@ def test_configuration_rejects_invalid_physical_shapes_and_scales() -> None:
     with pytest.raises(ValueError, match="6 finite"):
         AircraftConfig(inertia0=[1.0, 2.0, 3.0])
     with pytest.raises(ValueError, match="lower limits"):
-        ActuatorConfig(position_lower=[1.0] * 4, position_upper=[0.0] * 4)
+        ActuatorConfig(position_lower=[1.0] * 3, position_upper=[0.0] * 3)
     with pytest.raises(ValueError):
         SensorSingleConfig(noise_std=-1.0)
     with pytest.raises(ValueError):

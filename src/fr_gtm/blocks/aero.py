@@ -145,7 +145,7 @@ def _control_coefficients(
     cfg: GTMConfig,
     alpha: Signal,
     beta: Signal,
-    actuators: Signal,
+    surfaces: Signal,
     c_e: Signal,
     c_a: Signal,
     c_r: Signal,
@@ -186,7 +186,7 @@ def _control_coefficients(
         n_out=6,
     )
 
-    elevator, aileron, rudder = actuators[0], actuators[1], actuators[2]
+    elevator, aileron, rudder = surfaces[0], surfaces[1], surfaces[2]
     stabilizer = elevator_table(alpha, beta, 0.0, 0.0)
     stabilizer_c6 = (
         fr.math.vector([stabilizer[0], 0.0, stabilizer[1], 0.0, stabilizer[2], 0.0])
@@ -353,7 +353,7 @@ def aerodynamic_loads(
     beta: Signal,
     tas: Signal,
     pqr: Signal,
-    actuators: Signal,
+    surfaces: Signal,
     c_static_unc: Signal,
     c_e_unc: Signal,
     c_a_unc: Signal,
@@ -370,8 +370,8 @@ def aerodynamic_loads(
         beta: 侧滑角，单位 deg。
         tas: 真空速，单位 m/s。
         pqr: 相对气流的机体系角速率，单位 rad/s。
-        actuators: 四个作动器位置 `[elevator, aileron, rudder, throttle]`，
-            角度单位 deg，油门单位 %。
+        surfaces: 三个舵面位置 `[elevator, aileron, rudder]`，单位 deg；
+            油门不参与气动。
         c_static_unc: 六个静态系数的相对不确定性增量。
         c_e_unc: 三个升降舵系数的相对不确定性增量。
         c_a_unc: 六个副翼系数的相对不确定性增量。
@@ -390,7 +390,7 @@ def aerodynamic_loads(
     reynolds = _reynolds(cfg, altitude, mach)
     coefficients = (
         _basic_coefficients(cfg, alpha, beta, reynolds, c_static)
-        + _control_coefficients(cfg, alpha, beta, actuators, c_e, c_a, c_r)
+        + _control_coefficients(cfg, alpha, beta, surfaces, c_e, c_a, c_r)
         + _dynamic_coefficients(cfg, alpha, beta, tas, pqr)
     )
 
@@ -417,7 +417,9 @@ def Aero(cfg: GTMConfig) -> None:
         位置与速度使用 NED/FRD 国际单位制。GTM 气动查表坐标保留度，因此
         alpha/beta 在本 Block 边界处换算。动导分解前会先减去突风角速度。
     """
-    actuators = fr.input("actuators", (4,), description="Actuator positions")
+    surfaces = fr.input(
+        "surfaces", (3,), unit="deg", description="Control surface positions"
+    )
     position = fr.input("position", (3,), unit="m")
     velocity = fr.input("velocity", (3,), unit="m/s")
     quat = fr.input("quat", (4,))
@@ -459,7 +461,7 @@ def Aero(cfg: GTMConfig) -> None:
         beta=beta,
         tas=tas,
         pqr=air_omega,
-        actuators=actuators,
+        surfaces=surfaces,
         c_static_unc=c_static_unc,
         c_e_unc=c_e_unc,
         c_a_unc=c_a_unc,

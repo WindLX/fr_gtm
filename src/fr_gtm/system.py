@@ -25,7 +25,7 @@ _DEFAULT_CONFIG = GTMConfig.default()
 
 @fr.system(config=GTMConfig)
 def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
-    """组装 25 状态 GTM 被控对象与固定 21 通道观测。
+    """组装 26 状态 GTM 被控对象与固定 21 通道观测。
 
     Args:
         cfg: GTM 配置，给出几何、发动机、作动器、传感器、气动表与地面接触
@@ -35,8 +35,12 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
         根输入 `u(4,)` 为 `[elevator_deg, aileron_deg, rudder_deg,
         throttle_percent]`，`d(4,)` 驱动四个 Dryden 滤波器，`n(21,)` 提供
         标准化传感器噪声。所有随机量都由外部输入，因此零输入下系统是
-        确定性的。`feedback_y` 只含 17 个物理量，刻意不含四个作动器指令
+        确定性的。`feedback_y` 只含 17 个物理量，刻意不含四个指令
         遥测通道，便于在内层接入控制器。
+
+        前三个指令通道进入三通道一阶作动器，第四通道直接进入 `Engine` 的
+        二阶油门滞后；油门不再经过作动器，因此 `Root::u[3]` 是命令油门，
+        `Root::effective_throttle` 是滞后后的有效油门。
     """
     u = fr.input(
         "u",
@@ -53,7 +57,7 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
     actuator = SimpleActuator(
         "actuator",
         SimpleActuatorConfig(
-            adim=4,
+            adim=3,
             gain=cfg.actuator.gain,
             rate_limit=cfg.actuator.rate_limit,
             position_lower=cfg.actuator.position_lower,
@@ -76,7 +80,8 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
 
     # Command dynamics and environmental disturbances remain independent root
     # inputs, which permits deterministic tests and externally sampled noise.
-    u >> actuator.command
+    u[:3] >> actuator.command
+    fr.math.vector([u[3]]) >> engine.throttle_command
     d >> wind.noise
 
     # Altitude is positive above the NED origin. Dryden intentionally receives
@@ -86,9 +91,19 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
     eom.vel_body_out >> wind.velocity
     eom.DCM >> wind.DCM
 
+    # Aero consumes the three surface positions, which are also exported on their
+    # own so that control-effectiveness queries against the exported signal stay
+    # inside the aero moment dependency closure.
+    surface_position = actuator.position_out
+    # `Root::actuator_position` keeps the frozen gtm_ad four-channel observation
+    # layout: the three surface positions followed by the effective throttle.
+    actuator_position = fr.math.concatenate(
+        [surface_position, engine.effective_throttle]
+    )
+
     # Aero consumes wind-relative translational/angular motion internally and
     # preserves the gtm_ad coefficient-table ordering and Kalviste rate split.
-    actuator.position_out >> aero.actuators
+    surface_position >> aero.surfaces
     eom.pos_ned_out >> aero.position
     eom.vel_body_out >> aero.velocity
     eom.quat_out >> aero.quat
@@ -97,8 +112,8 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
     wind.omega >> aero.wind_omega
 
     # The twin-engine block owns thrust, ram drag, offset moments and rotor
-    # gyroscopic effects; it shares air-data produced by the aero block.
-    actuator.position_out >> engine.actuators
+    # gyroscopic effects; it shares air-data produced by the aero block. The
+    # fourth command channel bypasses the actuator and drives the lag directly.
     eom.omega_body_out >> engine.omega_body
     aero.pressure_ratio >> engine.pressure_ratio
     aero.qbar >> engine.qbar
@@ -144,7 +159,7 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
     eom.omega_body_out >> sensor.omega_body
     nz >> sensor.nz
     aero.qbar >> sensor.qbar
-    actuator.position_out >> sensor.act_pos
+    actuator_position >> sensor.act_pos
     n[:17] >> sensor.noise
 
     clean_y = fr.math.concatenate([sensor.clean_feedback, u])
@@ -182,7 +197,9 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
         coefficients=aero.coefficients,
         reynolds=aero.reynolds,
         quat_dot_reference=quat_dot_reference,
-        actuator_position=actuator.position_out,
+        surface_position=surface_position,
+        actuator_position=actuator_position,
+        effective_throttle=engine.effective_throttle,
     )
     if cfg.ground.enabled:
         fr.export(
@@ -199,21 +216,28 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
 def build_initial_state[ArrayT](
     model: fr.CompiledModel[ArrayT],
     cfg: GTMConfig = _DEFAULT_CONFIG,
+    *,
+    throttle: float = 0.0,
 ) -> np.ndarray:
-    """用完整路径构建默认的 25 元物理初始状态。
+    """用完整路径构建默认的 26 元物理初始状态。
 
     Args:
         model: 编译后的 GTM 模型，提供 `x.build` 状态索引。
-        cfg: GTM 配置；当前实现不读取该参数，保留它是为了统一调用签名。
+        cfg: GTM 配置，提供滞后矩阵以把 `throttle` 换算成配平一致的滞后状态。
+        throttle: 期望配平有效油门百分比，默认 0；调用方须把 `Root::u[3]` 也
+            设成同一个值，否则起点不是配平点。
 
     Returns:
-        np.ndarray: 长度为 25 的浮点状态向量，依次为 13 个刚体状态、4 个
-            作动器状态与 8 个 Dryden 成形滤波器状态，四元数按标量在前排列。
+        np.ndarray: 长度为 26 的浮点状态向量，依次为 13 个刚体状态、3 个
+            作动器状态、2 个发动机滞后状态与 8 个 Dryden 成形滤波器状态，
+            四元数按标量在前排列。
 
     Note:
         默认为机体系 50 m/s 前向速度，姿态与角速率为零，位置在 NED 原点。
+        `Root.engine::lag_state` 由 `EngineLagConfig.trim_state(throttle)` 给出，
+        不是零向量：把两个内部状态置零会在起点制造一段推力暂态。
     """
-    del cfg
+    lag_state = np.asarray(cfg.engine.lag.trim_state(throttle))
     return model.to_numpy(
         model.x.build(
             {
@@ -221,7 +245,8 @@ def build_initial_state[ArrayT](
                 "Root.eom::vel_body": np.array([50.0, 0.0, 0.0]),
                 "Root.eom::quat": np.array([1.0, 0.0, 0.0, 0.0]),
                 "Root.eom::omega_body": np.zeros(3),
-                "Root.actuator::position": np.zeros(4),
+                "Root.actuator::position": np.zeros(3),
+                "Root.engine::lag_state": lag_state,
                 "Root.wind.dryden::u_gw": np.zeros(1),
                 "Root.wind.dryden::v_gw": np.zeros(2),
                 "Root.wind.dryden::w_gw": np.zeros(2),
@@ -240,6 +265,7 @@ def build_ground_initial_state[ArrayT](
     forward_speed_mps: float = 0.0,
     altitude_agl_m: float = 0.0,
     sink_rate_mps: float = 0.0,
+    throttle: float = 0.0,
 ) -> np.ndarray:
     """构建跑道相对的地面滑行或接地初始状态。
 
@@ -249,9 +275,11 @@ def build_ground_initial_state[ArrayT](
         forward_speed_mps: 沿 NED 北向的水平速度，单位 m/s，须为有限非负值。
         altitude_agl_m: 离地高度，单位 m，须为有限非负值。
         sink_rate_mps: 沿 NED 下向的下降率，单位 m/s，须为有限非负值。
+        throttle: 期望配平有效油门百分比，默认 0；调用方须把 `Root::u[3]` 也
+            设成同一个值。
 
     Returns:
-        np.ndarray: 长度为 25 的浮点状态向量，姿态由静态地面姿态与
+        np.ndarray: 长度为 26 的浮点状态向量，姿态由静态地面姿态与
             `altitude_agl_m` 决定，机体系速度由 NED 速度旋转得到。
 
     Raises:
@@ -260,8 +288,9 @@ def build_ground_initial_state[ArrayT](
     Note:
         `forward_speed_mps` 是水平速度，`sink_rate_mps` 是 NED 下向速度；
         两者在写入刚体状态前旋转到 FRD，因此带俯仰的停机姿态不会引入额外的
-        爬升或下降率。
+        爬升或下降率。`Root.engine::lag_state` 同样由 `trim_state(throttle)` 给出。
     """
+    lag_state = np.asarray(cfg.engine.lag.trim_state(throttle))
 
     if not np.isfinite(forward_speed_mps) or forward_speed_mps < 0.0:
         raise ValueError("forward_speed_mps must be finite and nonnegative")
@@ -298,7 +327,8 @@ def build_ground_initial_state[ArrayT](
                 "Root.eom::vel_body": velocity_body,
                 "Root.eom::quat": quat,
                 "Root.eom::omega_body": np.zeros(3),
-                "Root.actuator::position": np.zeros(4),
+                "Root.actuator::position": np.zeros(3),
+                "Root.engine::lag_state": lag_state,
                 "Root.wind.dryden::u_gw": np.zeros(1),
                 "Root.wind.dryden::v_gw": np.zeros(2),
                 "Root.wind.dryden::w_gw": np.zeros(2),

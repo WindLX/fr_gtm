@@ -69,6 +69,112 @@ class UncertaintyConfig(BaseModel):
     gravity_acc: float = Field(default=9.80665, gt=0.0)  # m/s^2
 
 
+class EngineLagConfig(BaseModel):
+    """原始 NASA 缩比 GTM 的 JetCat P70 二阶油门滞后。
+
+    状态空间为 `ẋ_e = (A x_e + B δ_c) / c`、`δ = C x_e`，其中 `δ_c` 是钳位后的
+    油门指令百分比，`δ` 是有效油门百分比，`c` 是时间尺度系数。矩阵按行优先
+    展开存放：`state_matrix` 是 `[a11, a12, a21, a22]`。
+
+    Attributes:
+        state_matrix: 状态矩阵 `A` 的行优先展开，四元素。
+        input_matrix: 输入矩阵 `B`，两元素。
+        output_matrix: 输出矩阵 `C`，两元素。
+        time_scale: 时间尺度系数，必须为正；`A` 与 `B` 同时除以它。
+        command_lower: 油门指令下限，单位 %。
+        command_upper: 油门指令上限，单位 %，必须大于下限。
+
+    Note:
+        默认矩阵取自 `gtm_design/gtm_design.slx` 的 `Left_Engine / Jetcat P70`
+        `Throttle Lag` 子系统，直流增益为 1，因此静态映射的输入与输出都是
+        有效油门百分比。`time_scale` 在 fullscale 与 scale 下都取 1，两侧滞后
+        动态相同，不按几何扩比因子缩放。
+    """
+
+    state_matrix: list[float] = Field(
+        default_factory=lambda: [-1.336, -0.7314, 1.0, 0.0]
+    )  # A, row-major.
+    input_matrix: list[float] = Field(default_factory=lambda: [1.0, 0.0])  # B.
+    output_matrix: list[float] = Field(default_factory=lambda: [-0.1474, 0.7314])  # C.
+    time_scale: float = Field(default=1.0, gt=0.0)
+    command_lower: float = 0.0  # Throttle command lower limit [%].
+    command_upper: float = 100.0  # Throttle command upper limit [%].
+
+    @model_validator(mode="after")
+    def validate_lag(self) -> "EngineLagConfig":
+        """校验滞后矩阵形状、限幅关系与单位直流增益。
+
+        Returns:
+            通过校验的自身实例。
+
+        Raises:
+            ValueError: 矩阵长度或有限性不合法、指令下限不低于上限、状态矩阵
+                奇异，或直流增益不为 1。
+        """
+
+        for name, value, size in (
+            ("state_matrix", self.state_matrix, 4),
+            ("input_matrix", self.input_matrix, 2),
+            ("output_matrix", self.output_matrix, 2),
+        ):
+            if len(value) != size or not np.all(np.isfinite(value)):
+                raise ValueError(f"engine lag {name} must contain {size} finite values")
+        if self.command_lower >= self.command_upper:
+            raise ValueError("engine lag command lower limit must be below upper limit")
+        if abs(self.dc_gain - 1.0) > 1e-9:
+            raise ValueError(
+                "engine lag must have unit DC gain so the effective throttle "
+                "matches the commanded throttle at trim"
+            )
+        return self
+
+    @property
+    def trim_map(self) -> tuple[float, float]:
+        """`-A⁻¹ B`：把有效油门映射到配平一致状态的两位向量。
+
+        Returns:
+            `(m1, m2)`，满足 `x_{e,★} = (m1, m2) · δ_★`。
+
+        Raises:
+            ValueError: 状态矩阵奇异，配平状态不唯一。
+        """
+
+        a11, a12, a21, a22 = self.state_matrix
+        b1, b2 = self.input_matrix
+        det = a11 * a22 - a12 * a21
+        if det == 0.0:
+            raise ValueError("engine lag state matrix must be nonsingular")
+        return ((a12 * b2 - a22 * b1) / det, (a21 * b1 - a11 * b2) / det)
+
+    @property
+    def dc_gain(self) -> float:
+        """`C (-A⁻¹ B)`，二阶滞后从有效油门到有效油门的直流增益。
+
+        Returns:
+            直流增益，必须为 1 才使有效油门在配平时等于指令油门。
+        """
+
+        m1, m2 = self.trim_map
+        c1, c2 = self.output_matrix
+        return c1 * m1 + c2 * m2
+
+    def trim_state(self, throttle: float) -> tuple[float, float]:
+        """返回有效油门为 `throttle` 时的配平一致滞后状态。
+
+        把两个内部状态都置零会人为制造一段推力暂态，因此任何非零油门初值都
+        必须用本函数给出 `x_{e,★}`。
+
+        Args:
+            throttle: 配平有效油门百分比。
+
+        Returns:
+            `x_{e,★} = -A⁻¹ B δ_★`，两位内部状态。
+        """
+
+        m1, m2 = self.trim_map
+        return (m1 * throttle, m2 * throttle)
+
+
 class EngineConfig(BaseModel):
     """GTM 双发推力与陀螺力矩配置。
 
@@ -82,7 +188,8 @@ class EngineConfig(BaseModel):
         shaft_length: 转轴长度，单位 ft，沿用源模型。
         density: 转轴材料密度，单位 slug/ft³。
         thrust_coefficients: 由参考 RPM 计算推力的多项式系数，最高次在前。
-        throttle_coefficients: 由油门计算参考 RPM 的多项式系数，最高次在前。
+        throttle_coefficients: 由有效油门计算参考 RPM 的多项式系数，最高次在前。
+        lag: 油门指令到有效油门的二阶滞后。
         engl_pos: 左发安装位置，单位 m，机体三元素。
         engr_pos: 右发安装位置，单位 m，机体三元素。
         engl_ang: 左发 `[roll, pitch, yaw]` 安装角，单位 deg。
@@ -104,6 +211,7 @@ class EngineConfig(BaseModel):
     throttle_coefficients: list[float] = Field(
         default_factory=lambda: [0.0, -0.00835, 1.19113, 31.519]
     )  # Polynomial coefficients for reference RPM from throttle.
+    lag: EngineLagConfig = Field(default_factory=EngineLagConfig)
     engl_pos: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0])
     engr_pos: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0])
     engl_ang: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0])
@@ -438,45 +546,44 @@ class WindConfig(BaseModel):
 
 
 class ActuatorConfig(BaseModel):
-    """`[升降舵, 副翼左右, 方向舵/油门]` 的作动器动力学限幅。
+    """`[升降舵, 副翼左右, 方向舵]` 的作动器动力学限幅。
 
     Attributes:
-        gain: 一阶作动器增益，四元素。
-        rate_limit: 速率上限，角度通道为 deg/s、油门通道为 %/s，四元素且
-            必须为正。
-        position_lower: 位置下限 `[deg, deg, deg, %]`，四元素。
-        position_upper: 位置上限 `[deg, deg, deg, %]`，四元素。
+        gain: 一阶作动器增益，三元素。
+        rate_limit: 速率上限，单位 deg/s，三元素且必须为正。
+        position_lower: 位置下限，单位 deg，三元素。
+        position_upper: 位置上限，单位 deg，三元素。
 
     Note:
-        四个向量的排列均为 `[elevator, aileron, rudder, throttle]`；位置下限
-        必须严格小于上限。
+        三个向量的排列均为 `[elevator, aileron, rudder]`；位置下限必须严格
+        小于上限。油门不是作动器通道，它的指令直接进入 `Engine` 的二阶滞后。
     """
 
     gain: list[float] = Field(default_factory=list)  # First-order actuator gains.
-    rate_limit: list[float] = Field(default_factory=list)  # Rate limits (deg/s or %/s).
+    rate_limit: list[float] = Field(default_factory=list)  # Rate limits [deg/s].
     position_lower: list[float] = Field(
-        default_factory=lambda: [-30.0, -20.0, -30.0, 0.0]
-    )  # Lower position limits [deg, deg, deg, %].
+        default_factory=lambda: [-30.0, -20.0, -30.0]
+    )  # Lower position limits [deg].
     position_upper: list[float] = Field(
-        default_factory=lambda: [20.0, 20.0, 30.0, 100.0]
-    )  # Upper position limits [deg, deg, deg, %].
+        default_factory=lambda: [20.0, 20.0, 30.0]
+    )  # Upper position limits [deg].
 
     @model_validator(mode="after")
     def validate_channels(self) -> "ActuatorConfig":
-        """校验四个作动器通道向量同长、有限，且限幅关系自洽。
+        """校验三个作动器通道向量同长、有限，且限幅关系自洽。
 
         Returns:
             通过校验的自身实例。
 
         Raises:
-            ValueError: 非空向量长度不为 4 或含非有限值、位置下限不低于
+            ValueError: 非空向量长度不为 3 或含非有限值、位置下限不低于
                 上限，或速率上限非正。
         """
 
         vectors = [self.gain, self.rate_limit, self.position_lower, self.position_upper]
         for value in vectors:
-            if value and (len(value) != 4 or not np.all(np.isfinite(value))):
-                raise ValueError("actuator vectors must contain 4 finite values")
+            if value and (len(value) != 3 or not np.all(np.isfinite(value))):
+                raise ValueError("actuator vectors must contain 3 finite values")
         if (
             self.position_lower
             and self.position_upper
@@ -829,6 +936,8 @@ def _build_engine_config(
         RPMref_gain = 1.0
         ram_drag_coeff = 0.01
 
+    # 滞后结构恢复为原始二阶后，扩比时间尺度系数取 c = 1：两侧使用同一份
+    # 滞后动态，不再按 sqrt(scale) 缩放，因此这里不区分全尺寸与缩比。
     return EngineConfig(
         T_gain=T_gain,
         h_gain=h_gain,
@@ -845,6 +954,7 @@ def _build_engine_config(
             1.191126728328792,
             31.518959847101669,
         ],
+        lag=EngineLagConfig(),
         engl_pos=aircraft.engl_pos,
         engr_pos=aircraft.engr_pos,
         engl_ang=aircraft.engl_ang,
@@ -861,18 +971,16 @@ def _build_actuator_config(is_fullscale: bool) -> ActuatorConfig:
                 5.0 * 2.0 * pi / sqrt(scale),
                 5.0 * 2.0 * pi / sqrt(scale),
                 5.0 * 2.0 * pi / sqrt(scale),
-                1.0 / 2.36 / sqrt(scale),
             ],
             rate_limit=[
                 300.0 / sqrt(scale),
                 300.0 / sqrt(scale),
                 300.0 / sqrt(scale),
-                33.3,
             ],
         )
     return ActuatorConfig(
-        gain=[5.0 * 2.0 * pi, 5.0 * 2.0 * pi, 5.0 * 2.0 * pi, 1.0 / 2.36],
-        rate_limit=[300.0, 300.0, 300.0, 100.0],
+        gain=[5.0 * 2.0 * pi, 5.0 * 2.0 * pi, 5.0 * 2.0 * pi],
+        rate_limit=[300.0, 300.0, 300.0],
     )
 
 
@@ -1009,6 +1117,7 @@ __all__ = [
     "ControlSurfacesConfig",
     "DynamicDerivativesConfig",
     "EngineConfig",
+    "EngineLagConfig",
     "GTMConfig",
     "Mode",
     "SensorConfig",

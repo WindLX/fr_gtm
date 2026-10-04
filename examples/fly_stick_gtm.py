@@ -120,12 +120,14 @@ def map_stick_to_command(
     Returns:
         np.ndarray: 形状 `(4,)` 的指令向量
             `[elevator_deg, aileron_deg, rudder_deg, throttle_percent]`，
-            已按 `cfg.actuator.position_lower`/`position_upper` 限幅。
+            前三个舵面通道已按 `cfg.actuator.position_lower`/`position_upper`
+            限幅，油门通道按 `cfg.engine.lag.command_lower`/`command_upper` 限幅。
     """
 
-    lower = cfg.actuator.position_lower
-    upper = cfg.actuator.position_upper
+    lower = np.asarray(cfg.actuator.position_lower, dtype=float)
+    upper = np.asarray(cfg.actuator.position_upper, dtype=float)
     scale = float(np.clip(control_scale, 0.0, 1.0))
+    lag = cfg.engine.lag
 
     # 三条舵面轴默认取反，与操纵面正方向对齐，可用 --invert-* 纠正。
     roll = _deadband(axes.roll if invert_roll else -axes.roll, axis_deadband)
@@ -136,28 +138,55 @@ def map_stick_to_command(
     aileron_limit = min(abs(float(lower[1])), abs(float(upper[1])))
     rudder_limit = min(abs(float(lower[2])), abs(float(upper[2])))
 
-    # 没有油门轴时保持标称油门百分比。
+    # 没有油门轴时保持标称油门百分比；油门是 Engine 的指令，不经作动器。
     throttle = nominal_throttle
     if axes.throttle is not None:
         throttle_axis = axes.throttle if invert_throttle else -axes.throttle
-        throttle = float(np.clip((throttle_axis + 1.0) * 50.0, 0.0, 100.0))
+        throttle = (throttle_axis + 1.0) * 50.0
 
-    command = np.array(
-        [
-            pitch * elevator_limit * scale,
-            roll * aileron_limit * scale,
-            yaw * rudder_limit * scale,
-            throttle,
-        ],
-        dtype=float,
-    )
-    # 最后统一按作动器行程限幅。
-    return np.asarray(
-        np.clip(
-            command, np.asarray(lower, dtype=float), np.asarray(upper, dtype=float)
+    surfaces = np.clip(
+        np.array(
+            [
+                pitch * elevator_limit * scale,
+                roll * aileron_limit * scale,
+                yaw * rudder_limit * scale,
+            ],
+            dtype=float,
         ),
-        dtype=float,
+        lower,
+        upper,
     )
+    return np.concatenate(
+        [
+            surfaces,
+            np.array([np.clip(throttle, lag.command_lower, lag.command_upper)]),
+        ]
+    )
+
+
+def clip_command(cfg: GTMConfig, command: np.ndarray) -> np.ndarray:
+    """把四通道指令钳位到配置允许的区间。
+
+    前三个舵面通道按 `cfg.actuator.position_lower`/`position_upper` 钳位，油门
+    通道按 `cfg.engine.lag.command_lower`/`command_upper` 钳位：油门是 Engine
+    的指令，不是作动器行程。
+
+    Args:
+        cfg: GTM 配置，提供舵面行程与油门指令区间。
+        command: `[elevator_deg, aileron_deg, rudder_deg, throttle_percent]`。
+
+    Returns:
+        np.ndarray: 钳位后的四元素浮点指令。
+    """
+
+    lag = cfg.engine.lag
+    surfaces = np.clip(
+        np.asarray(command[:3], dtype=float),
+        np.asarray(cfg.actuator.position_lower, dtype=float),
+        np.asarray(cfg.actuator.position_upper, dtype=float),
+    )
+    throttle = np.clip(float(command[3]), lag.command_lower, lag.command_upper)
+    return np.concatenate([surfaces, np.array([throttle])])
 
 
 # GTM 的根输入是 u(4) + d(4) + n(21) 共 29 个元素。
@@ -184,6 +213,7 @@ def build_input(model: fr.CompiledModel[Any], command: np.ndarray) -> np.ndarray
 # 构造水平匀速无角速率的保守初值，保证交互起步稳定。
 def build_stick_initial_state(
     model: fr.CompiledModel[Any],
+    cfg: GTMConfig,
     *,
     altitude_m: float,
     speed_mps: float,
@@ -192,12 +222,14 @@ def build_stick_initial_state(
     """构造用于交互式 GTM 控制的保守初始飞行状态。
 
     Returns:
-        np.ndarray: 25 元素状态向量：高度为 `altitude_m`（NED 下为
+        np.ndarray: 26 元素状态向量：高度为 `altitude_m`（NED 下为
             `-altitude_m`），机体系速度为 `[speed_mps, 0, 0]`，姿态为单位
-            四元数，作动器位置取 `command`，各 Dryden 状态为零。
+            四元数，三个舵面位置取 `command[:3]`，发动机滞后状态取
+            `command[3]` 对应的配平值，各 Dryden 状态为零。
     """
 
     # 高度存成 NED 的 -altitude_m，Dryden 各阶状态全部清零。
+    lag_state = np.asarray(cfg.engine.lag.trim_state(float(command[3])), dtype=float)
     return np.asarray(
         model.x.build(
             {
@@ -205,7 +237,8 @@ def build_stick_initial_state(
                 "Root.eom::vel_body": np.array([speed_mps, 0.0, 0.0]),
                 "Root.eom::quat": np.array([1.0, 0.0, 0.0, 0.0]),
                 "Root.eom::omega_body": np.zeros(3),
-                "Root.actuator::position": np.asarray(command, dtype=float),
+                "Root.actuator::position": np.asarray(command[:3], dtype=float),
+                "Root.engine::lag_state": lag_state,
                 "Root.wind.dryden::u_gw": np.zeros(1),
                 "Root.wind.dryden::v_gw": np.zeros(2),
                 "Root.wind.dryden::w_gw": np.zeros(2),
@@ -285,6 +318,7 @@ def build_proto_state(
     quat = np.asarray(output["Root::quat"], dtype=float).reshape(4)
     omega = np.asarray(output["Root::omega_body"], dtype=float).reshape(3)
     control = np.asarray(output["Root::actuator_position"], dtype=float).reshape(4)
+    # 四个通道依次是升降舵、副翼、方向舵与有效油门；油门已经过二阶滞后。
     # GTM 的 alpha 与 beta 单位是度，Proto 需要弧度。
     alpha, beta = airdata_angles_to_proto_radians(
         alpha_deg=float(np.asarray(output["Root::alpha"], dtype=float).reshape(-1)[0]),
@@ -462,14 +496,11 @@ async def main_async(args: Options) -> int:
         if args.manual_command is not None
         else np.array([0.0, 0.0, 0.0, args.nominal_throttle], dtype=float)
     )
-    command = np.clip(
-        command,
-        np.asarray(cfg.actuator.position_lower, dtype=float),
-        np.asarray(cfg.actuator.position_upper, dtype=float),
-    )
+    command = clip_command(cfg, command)
     # 初值高度与速度由 --initial-altitude 与 --initial-speed 决定。
     x = build_stick_initial_state(
         model,
+        cfg,
         altitude_m=args.initial_altitude,
         speed_mps=args.initial_speed,
         command=command,
@@ -528,14 +559,7 @@ async def main_async(args: Options) -> int:
         state = None if pool is None else pool.fetch_nowait().get(args.logical_name)
         axes, buttons = _read_alias_input(state, desc)
         if args.manual_command is not None:
-            command = np.asarray(
-                np.clip(
-                    np.asarray(args.manual_command, dtype=float),
-                    np.asarray(cfg.actuator.position_lower, dtype=float),
-                    np.asarray(cfg.actuator.position_upper, dtype=float),
-                ),
-                dtype=float,
-            )
+            command = clip_command(cfg, np.asarray(args.manual_command, dtype=float))
         else:
             command = map_stick_to_command(
                 axes,

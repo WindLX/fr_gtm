@@ -23,7 +23,8 @@ from fr_gtm import GTMConfig, GTMSystem
 def main() -> None:
     """装配风、不确定度与噪声输入，求一次连续输出并打印关键分量。"""
     # 默认配置为全尺寸、NORMAL 构型且不实例化地面接触；示例只关注气动与风响应。
-    builder = GTMSystem.build("Root", GTMConfig.default())
+    cfg = GTMConfig.default()
+    builder = GTMSystem.build("Root", cfg)
     model = fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
         builder, target=fr.targets.numpy
     )
@@ -35,7 +36,8 @@ def main() -> None:
             "Root.eom::pos_ned": [0.0, 0.0, -500.0],
             "Root.eom::vel_body": [90.0, 0.0, 5.0],
             "Root.eom::quat": [1.0, 0.0, 0.0, 0.0],
-            "Root.actuator::position": [-2.0, 0.0, 0.0, 42.0],
+            "Root.actuator::position": [-2.0, 0.0, 0.0],
+            "Root.engine::lag_state": cfg.engine.lag.trim_state(42.0),
             "Root.wind.dryden::u_gw": [0.2],
             "Root.wind.dryden::v_gw": [-0.1, 0.05],
             "Root.wind.dryden::w_gw": [0.1, -0.05],
