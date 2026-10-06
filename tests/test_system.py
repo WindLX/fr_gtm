@@ -8,6 +8,7 @@ from fly_ruler_core import VariableInfo
 from fly_ruler_core._core import PyCompiler
 
 from fr_gtm import (
+    EngineLagConfig,
     GTMConfig,
     GTMSystem,
     build_ground_initial_state,
@@ -69,8 +70,8 @@ def test_system_level_control_effectiveness_query_resolves_through_plant() -> No
 
 def test_layout_and_full_paths() -> None:
     model = _compile()
-    assert model.n_x == 26
-    assert model.n_xdot == 25
+    assert model.n_x == 25
+    assert model.n_xdot == 24
     assert model.n_p == 33
     assert "Root.eom::quat" in model.x.keys
     assert "Root.wind.dryden::w_gw" in model.x.keys
@@ -90,7 +91,7 @@ def test_initial_state_and_outputs_are_finite() -> None:
     )
     xdot, _, y, _ = model.continuous_fn(0.0, x, model.xd.build(), u, model.p.build())
     outputs = model.y.read(y)
-    assert x.shape == (26,)
+    assert x.shape == (25,)
     assert np.isfinite(xdot).all()
     assert np.isfinite(outputs["y"]).all()
     assert outputs["clean_y"].shape == (21,)
@@ -165,7 +166,7 @@ def test_optional_ground_contact_layout_and_static_support(
 ) -> None:
     cfg = GTMConfig.default(is_fullscale, enable_ground=True)
     model = _compile(cfg)
-    assert model.n_x == 26
+    assert model.n_x == 25
     assert model.n_u == 29
     assert model.n_p == 34
     assert "Root.ground.params::ground_down" in model.p.keys
@@ -334,3 +335,15 @@ def test_engine_block_uses_engine_config_cg_pos() -> None:
     baseline = _engine_block_moment(cfg)
     moved = _engine_block_moment(shifted)
     assert not np.allclose(baseline, moved)
+
+
+def test_original_engine_layout_and_initialization() -> None:
+    cfg = GTMConfig.default()
+    cfg.engine.lag = EngineLagConfig()
+    model = _compile(cfg)
+    assert (model.n_x, model.n_xdot) == (26, 25)
+    x = build_initial_state(model, cfg, throttle=40.0)
+    np.testing.assert_allclose(
+        model.x.read(x, by="path")["Root.engine::lag_state"],
+        [0.0, 40.0 / 0.7314],
+    )

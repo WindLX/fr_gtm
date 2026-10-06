@@ -25,7 +25,7 @@ _DEFAULT_CONFIG = GTMConfig.default()
 
 @fr.system(config=GTMConfig)
 def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
-    """组装 26 状态 GTM 被控对象与固定 21 通道观测。
+    """组装默认 25 状态 GTM 被控对象与固定 21 通道观测。
 
     Args:
         cfg: GTM 配置，给出几何、发动机、作动器、传感器、气动表与地面接触
@@ -39,7 +39,7 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
         遥测通道，便于在内层接入控制器。
 
         前三个指令通道进入三通道一阶作动器，第四通道直接进入 `Engine` 的
-        二阶油门滞后；油门不再经过作动器，因此 `Root::u[3]` 是命令油门，
+        可配置油门滞后；油门不再经过作动器，因此 `Root::u[3]` 是命令油门，
         `Root::effective_throttle` 是滞后后的有效油门。
     """
     u = fr.input(
@@ -219,7 +219,7 @@ def build_initial_state[ArrayT](
     *,
     throttle: float = 0.0,
 ) -> np.ndarray:
-    """用完整路径构建默认的 26 元物理初始状态。
+    """用完整路径构建默认的 25 元物理初始状态。
 
     Args:
         model: 编译后的 GTM 模型，提供 `x.build` 状态索引。
@@ -228,14 +228,14 @@ def build_initial_state[ArrayT](
             设成同一个值，否则起点不是配平点。
 
     Returns:
-        np.ndarray: 长度为 26 的浮点状态向量，依次为 13 个刚体状态、3 个
-            作动器状态、2 个发动机滞后状态与 8 个 Dryden 成形滤波器状态，
+        np.ndarray: 按所选发动机模型布局构造的浮点状态向量，依次为 13 个刚体状态、3 个
+            作动器状态、1 或 2 个发动机滞后状态与 8 个 Dryden 成形滤波器状态，
             四元数按标量在前排列。
 
     Note:
         默认为机体系 50 m/s 前向速度，姿态与角速率为零，位置在 NED 原点。
-        `Root.engine::lag_state` 由 `EngineLagConfig.trim_state(throttle)` 给出，
-        不是零向量：把两个内部状态置零会在起点制造一段推力暂态。
+        `Root.engine::lag_state` 由 `cfg.engine.lag.trim_state(throttle)` 给出，
+        不是零向量：把滞后状态置零会在起点制造一段推力暂态。
     """
     lag_state = np.asarray(cfg.engine.lag.trim_state(throttle))
     return model.to_numpy(
@@ -279,7 +279,7 @@ def build_ground_initial_state[ArrayT](
             设成同一个值。
 
     Returns:
-        np.ndarray: 长度为 26 的浮点状态向量，姿态由静态地面姿态与
+        np.ndarray: 按所选发动机模型布局构造的浮点状态向量，姿态由静态地面姿态与
             `altitude_agl_m` 决定，机体系速度由 NED 速度旋转得到。
 
     Raises:

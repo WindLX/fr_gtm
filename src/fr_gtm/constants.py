@@ -1,7 +1,7 @@
 """GTM 状态、控制、扰动、参数、噪声与输出向量的维度常量。"""
 
-XDIM = 26
-"""状态向量维数：26=pos(3)+vel_body(3)+att_quat(4)+omega(3)+act_pos(3)+lag_state(2)+dryden(8)。"""
+XDIM = 25
+"""默认状态维数：25=pos(3)+vel_body(3)+att_quat(4)+omega(3)+act_pos(3)+lag_state(1)+dryden(8)。原二阶模型为26维。"""
 UDIM = 4
 """控制向量维数：三个舵面位置指令加一个油门指令。"""
 DDIM = 4

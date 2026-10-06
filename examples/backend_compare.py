@@ -13,7 +13,7 @@ CasADi 与 JAX 一行应落在数值容差内；未安装 JAX 时打印跳过信
 依赖：CasADi 必须可用；JAX 为可选项。
 约定：位置取世界系 NED，速度在机体系 FRD，高度为 -pos_ned[2]；姿态四元数为
 scalar-first；三个舵面位置为 [升降舵, 副翼, 方向舵]（度），油门指令为百分比、
-先进 `Engine` 的二阶滞后再成为有效油门。
+先进 `Engine` 的可配置滞后再成为有效油门。
 """
 
 from importlib.util import find_spec
@@ -36,7 +36,7 @@ def _evaluate(model: fr.CompiledModel[ArrayT]) -> tuple[np.ndarray, np.ndarray]:
     """装配固定状态与输入，返回一次连续求值的 xdot 与 y 扁平向量。"""
     # 状态取 1000 m 高度（NED 下向为 -1000）、机体系速度 100 m/s 前向加 5 m/s 下向分量、
     # 零姿态；舵面取升降舵 -2 度、副翼 1 度、方向舵 0 度，油门指令 40%，
-    # 发动机二阶滞后状态取 40% 对应的配平值。
+    # 发动机滞后状态取 40% 对应的配平值。
     # 未列出的状态分量（角速度、Dryden 阵风等）由 build 默认为零。
     x = model.x.build(
         {

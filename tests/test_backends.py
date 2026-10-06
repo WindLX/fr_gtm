@@ -15,7 +15,7 @@ BACKEND_REFERENCE = np.load(
 )
 TRAJECTORY_BACKENDS = ("numpy", "casadi", "native", "jax")
 # 冻结轨迹的油门指令恒为 40%，参考的油门状态也恒为 40%；本模型用同一配平值
-# 初始化二阶滞后，因此整条轨迹仍应与参考一致。
+# 初始化所选滞后，因此整条轨迹仍应与参考一致。
 LAG = GTMConfig.default().engine.lag
 
 

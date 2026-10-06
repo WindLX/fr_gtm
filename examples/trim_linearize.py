@@ -1,7 +1,7 @@
 """用完整变量路径对 GTM 做部分配平与线性化。
 
 主题：先固定一个开环刚体工作点（1000 m 高度、100 m/s 前向、零姿态、40% 油门），用
-TrimSolver 只让三个舵面、发动机二阶滞后与八个 Dryden 内部状态的导数为零，再以配平点
+TrimSolver 只让三个舵面、发动机滞后与八个 Dryden 内部状态的导数为零，再以配平点
 为工作点线性化。
 
 运行：
@@ -70,7 +70,7 @@ def main() -> None:
             },
             state_derivative={
                 "Root.actuator::position": _array([0.0, 0.0, 0.0]),
-                "Root.engine::lag_state": _array([0.0, 0.0]),
+                "Root.engine::lag_state": _array([0.0]),
                 "Root.wind.dryden::u_gw": _array([0.0]),
                 "Root.wind.dryden::v_gw": _array([0.0, 0.0]),
                 "Root.wind.dryden::w_gw": _array([0.0, 0.0]),

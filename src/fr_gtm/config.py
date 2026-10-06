@@ -11,7 +11,7 @@ from enum import Enum
 from importlib import resources
 from math import pi, sqrt
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import numpy as np
 import rtoml
@@ -77,6 +77,7 @@ class EngineLagConfig(BaseModel):
     展开存放：`state_matrix` 是 `[a11, a12, a21, a22]`。
 
     Attributes:
+        model: 配置模型标识 `second_order`。
         state_matrix: 状态矩阵 `A` 的行优先展开，四元素。
         input_matrix: 输入矩阵 `B`，两元素。
         output_matrix: 输出矩阵 `C`，两元素。
@@ -91,6 +92,7 @@ class EngineLagConfig(BaseModel):
         动态相同，不按几何扩比因子缩放。
     """
 
+    model: Literal["second_order"] = "second_order"
     state_matrix: list[float] = Field(
         default_factory=lambda: [-1.336, -0.7314, 1.0, 0.0]
     )  # A, row-major.
@@ -175,6 +177,50 @@ class EngineLagConfig(BaseModel):
         return (m1 * throttle, m2 * throttle)
 
 
+class FirstOrderEngineLagConfig(BaseModel):
+    """一阶有效油门滞后，默认时间常数为 1.5 s。
+
+    指令先限幅，再通过 `τ δ̇ = δ_c − δ` 驱动有效油门状态。全尺寸和缩比
+    使用相同时间常数；这是可选近似模型，不是 JetCat 的辨识结果。
+
+    Attributes:
+        model: 配置模型标识 `first_order`。
+        time_constant_s: 正且有限的时间常数，单位 s。
+        command_lower: 指令下限，单位 %。
+        command_upper: 指令上限，单位 %。
+    """
+
+    model: Literal["first_order"] = "first_order"
+    time_constant_s: float = Field(default=1.5, gt=0.0, allow_inf_nan=False)
+    command_lower: float = Field(default=0.0, allow_inf_nan=False)
+    command_upper: float = Field(default=100.0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def validate_limits(self) -> "FirstOrderEngineLagConfig":
+        """校验指令下限低于上限。
+
+        Returns:
+            通过校验的配置。
+
+        Raises:
+            ValueError: 下限不低于上限。
+        """
+        if self.command_lower >= self.command_upper:
+            raise ValueError("engine lag command lower limit must be below upper limit")
+        return self
+
+    def trim_state(self, throttle: float) -> tuple[float]:
+        """返回指定有效油门的配平状态。
+
+        Args:
+            throttle: 有效油门百分比，应在配置的指令范围内。
+
+        Returns:
+            仅包含有效油门的一维状态元组。
+        """
+        return (throttle,)
+
+
 class EngineConfig(BaseModel):
     """GTM 双发推力与陀螺力矩配置。
 
@@ -189,7 +235,7 @@ class EngineConfig(BaseModel):
         density: 转轴材料密度，单位 slug/ft³。
         thrust_coefficients: 由参考 RPM 计算推力的多项式系数，最高次在前。
         throttle_coefficients: 由有效油门计算参考 RPM 的多项式系数，最高次在前。
-        lag: 油门指令到有效油门的二阶滞后。
+        lag: 油门指令到有效油门的滞后，默认一阶，可选择原二阶。
         engl_pos: 左发安装位置，单位 m，机体三元素。
         engr_pos: 右发安装位置，单位 m，机体三元素。
         engl_ang: 左发 `[roll, pitch, yaw]` 安装角，单位 deg。
@@ -211,7 +257,9 @@ class EngineConfig(BaseModel):
     throttle_coefficients: list[float] = Field(
         default_factory=lambda: [0.0, -0.00835, 1.19113, 31.519]
     )  # Polynomial coefficients for reference RPM from throttle.
-    lag: EngineLagConfig = Field(default_factory=EngineLagConfig)
+    lag: FirstOrderEngineLagConfig | EngineLagConfig = Field(
+        default_factory=FirstOrderEngineLagConfig, discriminator="model"
+    )
     engl_pos: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0])
     engr_pos: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0])
     engl_ang: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0])
@@ -556,7 +604,7 @@ class ActuatorConfig(BaseModel):
 
     Note:
         三个向量的排列均为 `[elevator, aileron, rudder]`；位置下限必须严格
-        小于上限。油门不是作动器通道，它的指令直接进入 `Engine` 的二阶滞后。
+        小于上限。油门不是作动器通道，它的指令直接进入 `Engine` 的可配置滞后。
     """
 
     gain: list[float] = Field(default_factory=list)  # First-order actuator gains.
@@ -954,7 +1002,7 @@ def _build_engine_config(
             1.191126728328792,
             31.518959847101669,
         ],
-        lag=EngineLagConfig(),
+        lag=FirstOrderEngineLagConfig(),
         engl_pos=aircraft.engl_pos,
         engr_pos=aircraft.engr_pos,
         engl_ang=aircraft.engl_ang,
@@ -1104,7 +1152,10 @@ def _deep_update(base: dict[str, object], updates: Mapping[str, object]) -> None
     for key, value in updates.items():
         existing = base.get(key)
         if isinstance(value, Mapping) and isinstance(existing, dict):
-            _deep_update(existing, value)
+            if "model" in value and value["model"] != existing.get("model"):
+                base[key] = dict(value)
+            else:
+                _deep_update(existing, value)
         else:
             base[key] = value
 
@@ -1118,6 +1169,7 @@ __all__ = [
     "DynamicDerivativesConfig",
     "EngineConfig",
     "EngineLagConfig",
+    "FirstOrderEngineLagConfig",
     "GTMConfig",
     "Mode",
     "SensorConfig",

@@ -8,18 +8,19 @@ import fly_ruler_core as fr
 import numpy as np
 import pytest
 
-from fr_gtm import GTMConfig, GTMSystem, Mode
+from fr_gtm import EngineLagConfig, GTMConfig, GTMSystem, Mode
 
 REFERENCE = np.load(Path(__file__).parent / "data" / "gtm_reference.npz")
 CASE_NAMES = REFERENCE["name"].tolist()
 # 冻结参考把油门建为一阶作动器状态，本模型把油门换成二阶滞后；两侧共用同一份
-# 滞后动态，因此这里用默认配置的滞后参数把参考的油门状态换算成滞后状态。
-LAG = GTMConfig.default().engine.lag
+# 滞后动态，因此这里显式选用原二阶配置把参考的油门状态换算成滞后状态。
+LAG = EngineLagConfig()
 
 
 @lru_cache(maxsize=None)
 def _model(fullscale: bool, mode: str) -> fr.CompiledModel[Any]:
     cfg = GTMConfig.default(fullscale, Mode(mode))
+    cfg.engine.lag = LAG
     builder = GTMSystem.build("Root", cfg)
     assert isinstance(builder, fr.PyIrBuilder)
     return fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(

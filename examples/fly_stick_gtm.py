@@ -222,7 +222,7 @@ def build_stick_initial_state(
     """构造用于交互式 GTM 控制的保守初始飞行状态。
 
     Returns:
-        np.ndarray: 26 元素状态向量：高度为 `altitude_m`（NED 下为
+        np.ndarray: 默认 25 元素状态向量：高度为 `altitude_m`（NED 下为
             `-altitude_m`），机体系速度为 `[speed_mps, 0, 0]`，姿态为单位
             四元数，三个舵面位置取 `command[:3]`，发动机滞后状态取
             `command[3]` 对应的配平值，各 Dryden 状态为零。
@@ -318,7 +318,7 @@ def build_proto_state(
     quat = np.asarray(output["Root::quat"], dtype=float).reshape(4)
     omega = np.asarray(output["Root::omega_body"], dtype=float).reshape(3)
     control = np.asarray(output["Root::actuator_position"], dtype=float).reshape(4)
-    # 四个通道依次是升降舵、副翼、方向舵与有效油门；油门已经过二阶滞后。
+    # 四个通道依次是升降舵、副翼、方向舵与有效油门；油门已经过所选滞后。
     # GTM 的 alpha 与 beta 单位是度，Proto 需要弧度。
     alpha, beta = airdata_angles_to_proto_radians(
         alpha_deg=float(np.asarray(output["Root::alpha"], dtype=float).reshape(-1)[0]),

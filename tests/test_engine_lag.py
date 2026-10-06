@@ -37,7 +37,7 @@ _ANALYTIC_RTOL = 1.0e-6
 
 def _lag() -> EngineLagConfig:
     """全尺寸与缩比共用同一份滞后动态，因此默认配置即可代表两者。"""
-    return GTMConfig.default().engine.lag
+    return EngineLagConfig()
 
 
 @lru_cache(maxsize=None)
@@ -45,7 +45,7 @@ def _engine_only(time_scale: float) -> tuple[GTMConfig, Any]:
     """编译只含 `Engine` 块的最小系统，便于单独观察有效油门。"""
 
     cfg = GTMConfig.default()
-    cfg.engine.lag.time_scale = time_scale
+    cfg.engine.lag = EngineLagConfig(time_scale=time_scale)
 
     @fr.system
     def EngineOnly() -> None:
@@ -143,9 +143,9 @@ def test_analytic_step_matches_numerical_integration() -> None:
 
 
 @pytest.mark.parametrize("fullscale", [False, True])
-def test_default_lag_matches_original_jetcat_matrices(fullscale: bool) -> None:
+def test_second_order_lag_matches_original_jetcat_matrices(fullscale: bool) -> None:
     """独立固定原始 SLX 左右 Jetcat P70 Mask 的系数，不从当前配置推导参考。"""
-    lag = GTMConfig.default(fullscale).engine.lag
+    lag = EngineLagConfig()
     np.testing.assert_array_equal(lag.state_matrix, [-1.336, -0.7314, 1.0, 0.0])
     np.testing.assert_array_equal(lag.input_matrix, [1.0, 0.0])
     np.testing.assert_array_equal(lag.output_matrix, [-0.1474, 0.7314])
@@ -251,6 +251,7 @@ def test_piecewise_constant_command_matches_exact_step() -> None:
     """分段常值命令下，数值推进逐步等于 `Φ x + Γ u` 的精确递推。"""
 
     cfg, model = _engine_only(1.0)
+    assert isinstance(cfg.engine.lag, EngineLagConfig)
     transition, gain = _zero_order_hold(cfg.engine.lag, _DT)
     commands = (0.0, 0.0, 35.0, 35.0, 35.0, 80.0, 80.0, 20.0, 20.0, 20.0, 100.0)
     x = model.x.build(
