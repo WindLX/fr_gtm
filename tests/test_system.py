@@ -17,12 +17,23 @@ from fr_gtm import (
 from fr_gtm.blocks import Engine, Mass
 
 
-def _compile(cfg: GTMConfig | None = None) -> fr.CompiledModel[Any]:
-    builder = GTMSystem.build("Root", cfg or GTMConfig.default())
+def _compile(cfg: GTMConfig) -> fr.CompiledModel[Any]:
+    builder = GTMSystem.build("Root", cfg)
     assert isinstance(builder, fr.PyIrBuilder)
     return fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
         builder, target=fr.targets.numpy
     )
+
+
+@pytest.fixture(scope="module")
+def default_model() -> fr.CompiledModel[Any]:
+    """共享编译结果；每个测试仍独立构建状态、输入和运行参数。"""
+    return _compile(GTMConfig.default())
+
+
+@pytest.fixture(scope="module")
+def ground_model() -> fr.CompiledModel[Any]:
+    return _compile(GTMConfig.default(enable_ground=True))
 
 
 def test_topology_contains_semantic_physical_blocks() -> None:
@@ -68,8 +79,8 @@ def test_system_level_control_effectiveness_query_resolves_through_plant() -> No
     assert query.wrt_shape == [3]
 
 
-def test_layout_and_full_paths() -> None:
-    model = _compile()
+def test_layout_and_full_paths(default_model: fr.CompiledModel[Any]) -> None:
+    model = default_model
     assert model.n_x == 25
     assert model.n_xdot == 24
     assert model.n_p == 33
@@ -79,8 +90,10 @@ def test_layout_and_full_paths() -> None:
     assert "Root.wind.params::wind_speed" in model.p.keys
 
 
-def test_initial_state_and_outputs_are_finite() -> None:
-    model = _compile()
+def test_initial_state_and_outputs_are_finite(
+    default_model: fr.CompiledModel[Any],
+) -> None:
+    model = default_model
     x = build_initial_state(model)
     u = model.u.build(
         {
@@ -101,10 +114,12 @@ def test_initial_state_and_outputs_are_finite() -> None:
     np.testing.assert_array_equal(outputs["clean_feedback_y"], outputs["clean_y"][:17])
 
 
-def test_command_telemetry_is_excluded_from_feedback() -> None:
+def test_command_telemetry_is_excluded_from_feedback(
+    default_model: fr.CompiledModel[Any],
+) -> None:
     """控制器反馈不得对根指令存在直接前馈。"""
 
-    model = _compile()
+    model = default_model
     x = build_initial_state(model)
     outputs = []
     for command in (np.zeros(4), np.array([2.0, -3.0, 1.0, 75.0])):
@@ -121,8 +136,10 @@ def test_command_telemetry_is_excluded_from_feedback() -> None:
     assert not np.array_equal(outputs[0]["y"][17:], outputs[1]["y"][17:])
 
 
-def test_short_integration_preserves_quaternion_norm() -> None:
-    model = _compile()
+def test_short_integration_preserves_quaternion_norm(
+    default_model: fr.CompiledModel[Any],
+) -> None:
+    model = default_model
     x0 = build_initial_state(model)
     u = model.u.build(
         {
@@ -144,8 +161,10 @@ def test_short_integration_preserves_quaternion_norm() -> None:
     )
 
 
-def test_wind_direction_runtime_parameter_is_radians() -> None:
-    model = _compile()
+def test_wind_direction_runtime_parameter_is_radians(
+    default_model: fr.CompiledModel[Any],
+) -> None:
+    model = default_model
     x = build_initial_state(model)
     u = model.u.build(
         {"Root::u": np.zeros(4), "Root::d": np.zeros(4), "Root::n": np.zeros(21)}
@@ -163,9 +182,10 @@ def test_wind_direction_runtime_parameter_is_radians() -> None:
 @pytest.mark.parametrize("is_fullscale", [False, True])
 def test_optional_ground_contact_layout_and_static_support(
     is_fullscale: bool,
+    ground_model: fr.CompiledModel[Any],
 ) -> None:
     cfg = GTMConfig.default(is_fullscale, enable_ground=True)
-    model = _compile(cfg)
+    model = ground_model if is_fullscale else _compile(cfg)
     assert model.n_x == 25
     assert model.n_u == 29
     assert model.n_p == 34
@@ -210,9 +230,11 @@ def test_optional_ground_contact_layout_and_static_support(
     )
 
 
-def test_ground_touchdown_short_trajectory_is_finite() -> None:
+def test_ground_touchdown_short_trajectory_is_finite(
+    ground_model: fr.CompiledModel[Any],
+) -> None:
     cfg = GTMConfig.default(enable_ground=True)
-    model = _compile(cfg)
+    model = ground_model
     x = build_ground_initial_state(
         model,
         cfg,

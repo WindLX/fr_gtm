@@ -72,17 +72,28 @@ def test_real_elevator_cubic_public_nested_ad_matches_independent_spline() -> No
             )
 
 
-@pytest.mark.parametrize("backend", ["casadi", "jax", "torch"])
-def test_cubic_gtm_short_trajectory_matches_numpy(backend: str) -> None:
-    if backend in ("jax", "torch"):
-        pytest.importorskip(backend)
+@pytest.fixture(scope="module")
+def cubic_case() -> tuple[GTMConfig, fr.PyIrBuilder, fr.Compiler, fr.NumpyArray]:
+    """三种候选后端共用一次 NumPy 构图、编译和参考轨迹。"""
     cfg = GTMConfig.default()
     cfg.aero.interpolation_method = "cubic"
     builder = GTMSystem.build("Root", cfg)
+    assert isinstance(builder, fr.PyIrBuilder)
     compiler = fr.Compiler(
         fr.CompilerSpec(cache_policy="off", integrator="rk4", dt=0.01)
     )
     expected = simulate(compiler.compile(builder, target=fr.targets.numpy), cfg)
+    return cfg, builder, compiler, expected
+
+
+@pytest.mark.parametrize("backend", ["casadi", "jax", "torch"])
+def test_cubic_gtm_short_trajectory_matches_numpy(
+    backend: str,
+    cubic_case: tuple[GTMConfig, fr.PyIrBuilder, fr.Compiler, fr.NumpyArray],
+) -> None:
+    if backend in ("jax", "torch"):
+        pytest.importorskip(backend)
+    cfg, builder, compiler, expected = cubic_case
     if backend == "casadi":
         actual = simulate(compiler.compile(builder, target=fr.targets.casadi), cfg)
     elif backend == "jax":

@@ -97,8 +97,11 @@ def _compiled_backend(name: str, *, enable_ground: bool = False) -> Any:
             _builder(enable_ground=enable_ground), target=fr.targets.jax
         )
     if name == "native":
-        casadi_model = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=dt)).compile(
-            _builder(enable_ground=enable_ground), target=fr.targets.casadi
+        # lru_cache 区分省略参数与显式 False；复用与现有调用一致的键。
+        casadi_model = (
+            _compiled_backend("casadi", enable_ground=True)
+            if enable_ground
+            else _compiled_backend("casadi")
         )
         return fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=dt)).convert(
             casadi_model, target=fr.targets.NativeTarget()

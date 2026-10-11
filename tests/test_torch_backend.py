@@ -13,16 +13,23 @@ from fr_gtm import GTMConfig, GTMSystem, build_initial_state
 torch = pytest.importorskip("torch")
 
 
+@pytest.fixture(scope="module")
+def reference() -> fr.CasadiModel:
+    """CPU/CUDA 与两种精度复用同一只读 FP64 对照模型。"""
+    return fr.Compiler(fr.CompilerSpec(integrator="rk4", cache_policy="off")).compile(
+        GTMSystem.build("Root", GTMConfig.default())
+    )
+
+
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
 @pytest.mark.parametrize("dtype", ["float32", "float64"])
 def test_gtm_torch_endpoint_batch_and_gradient(
-    device: str, dtype: Literal["float32", "float64"]
+    device: str, dtype: Literal["float32", "float64"], reference: fr.CasadiModel
 ) -> None:
     if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA is not available")
     cfg = GTMConfig.default()
     compiler = fr.Compiler(fr.CompilerSpec(integrator="rk4", cache_policy="off"))
-    reference = compiler.compile(GTMSystem.build("Root", cfg))
     model = compiler.compile(
         GTMSystem.build("Root", cfg),
         target=fr.targets.TorchTarget(device=device, dtype=dtype),
