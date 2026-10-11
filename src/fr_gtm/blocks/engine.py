@@ -116,6 +116,29 @@ def _engine_loads(
 
 
 @fr.block(config=GTMConfig)
+def EngineLoads(cfg: GTMConfig) -> None:
+    """无状态双发载荷，供连续反馈图将滞后状态与载荷求值分开。
+
+    输入为实际有效油门（百分点）、机体系角速率（rad/s）、当地压力比及
+    动压（Pa）。它们决定当前推力、安装力矩和转子陀螺力矩；油门命令不
+    直接参与当前载荷。这里复用Engine的同一载荷函数，不新增发动机动态、
+    不复制多项式或在下游重建推力。状态及命令限幅由调用方的滞后块拥有。
+
+    Args:
+        cfg: GTM配置，提供发动机载荷映射、安装几何及参考面积。
+    """
+    effective_throttle = fr.input("effective_throttle", (1,), unit="%")
+    omega_body = fr.input("omega_body", (3,), unit="rad/s")
+    pressure_ratio = fr.input("pressure_ratio", (1,))
+    qbar = fr.input("qbar", (1,), unit="Pa")
+    force, moment = _engine_loads(
+        cfg, effective_throttle[0], omega_body, pressure_ratio[0], qbar[0]
+    )
+    fr.output("force", force, dim=(3,), unit="N")
+    fr.output("moment", moment, dim=(3,), unit="N*m")
+
+
+@fr.block(config=GTMConfig)
 def Engine(cfg: GTMConfig) -> None:
     """由油门指令、空速与机体角速率计算双发 FRD 载荷。
 

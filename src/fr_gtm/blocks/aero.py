@@ -65,7 +65,7 @@ def _reynolds(cfg: GTMConfig, altitude: Signal, mach: Signal) -> Signal:
             table_cfg.mach,
         ],
         values=reynolds_values,
-        method="linear",
+        method=cfg.aero.interpolation_method,
     )
     return table(altitude / 0.3048, mach)
 
@@ -86,14 +86,14 @@ def _basic_coefficients(
             basic.reynolds_c2,
         ],
         values=basic.cx_cz,
-        method="linear",
+        method=cfg.aero.interpolation_method,
         n_out=2,
     )(alpha, beta, reynolds)
     lateral = fr.resource.interpolator(
         "basic_cy_cl_cm_cn",
         grid_points=[basic.alpha_c4, basic.beta_c4],
         values=basic.cy_cl_cm_cn,
-        method="linear",
+        method=cfg.aero.interpolation_method,
         n_out=4,
     )(alpha, beta)
     return (
@@ -160,7 +160,7 @@ def _control_coefficients(
             control.elevator,
         ],
         values=control.elevator_data,
-        method="linear",
+        method=cfg.aero.interpolation_method,
         n_out=3,
     )
     aileron_table = fr.resource.interpolator(
@@ -171,7 +171,7 @@ def _control_coefficients(
             control.aileron,
         ],
         values=control.aileron_data,
-        method="linear",
+        method=cfg.aero.interpolation_method,
         n_out=6,
     )
     rudder_table = fr.resource.interpolator(
@@ -182,7 +182,7 @@ def _control_coefficients(
             control.rudder,
         ],
         values=control.rudder_data,
-        method="linear",
+        method=cfg.aero.interpolation_method,
         n_out=6,
     )
 
@@ -294,21 +294,21 @@ def _dynamic_coefficients(
         "dynamic_p",
         grid_points=[dynamic.alpha_p, dynamic.phat],
         values=dynamic.p,
-        method="linear",
+        method=cfg.aero.interpolation_method,
         n_out=3,
     )
     q_table = fr.resource.interpolator(
         "dynamic_q",
         grid_points=[dynamic.alpha_q, dynamic.qhat],
         values=dynamic.q,
-        method="linear",
+        method=cfg.aero.interpolation_method,
         n_out=3,
     )
     r_table = fr.resource.interpolator(
         "dynamic_r",
         grid_points=[dynamic.alpha_r, dynamic.rhat],
         values=dynamic.r,
-        method="linear",
+        method=cfg.aero.interpolation_method,
         n_out=3,
     )
     w_table = fr.resource.interpolator(
@@ -319,7 +319,7 @@ def _dynamic_coefficients(
             dynamic.beta_w,
         ],
         values=dynamic.w,
-        method="linear",
+        method=cfg.aero.interpolation_method,
         n_out=6,
     )
 

@@ -652,6 +652,7 @@ class AeroConfig(BaseModel):
         data_path: 可选的 `aero_tables.npz` 路径或其所在目录；为 `None` 时
             使用包内资源。
         tables: 经过校验的冻结气动表资源。
+        interpolation_method: 编译期统一插值方法；默认 linear，cubic 显式启用。
         control_surfaces: 舵面展向力臂。
         dynamic_derivatives: Kalviste 动导参考长度。
         force_moment: 参考面积/长度与气动中心偏置。
@@ -663,6 +664,7 @@ class AeroConfig(BaseModel):
     # Optional aero_tables.npz path or containing directory.
     data_path: str | None = None
     tables: AeroTableResources = Field(exclude=True)
+    interpolation_method: Literal["linear", "cubic"] = "linear"
     control_surfaces: ControlSurfacesConfig = Field(
         default_factory=ControlSurfacesConfig
     )
