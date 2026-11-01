@@ -60,12 +60,13 @@ def _reynolds(cfg: GTMConfig, altitude: Signal, mach: Signal) -> Signal:
     )
     table = fr.resource.interpolator(
         "reynolds",
+        method=cfg.aero.interpolation_method,
+        extrapolation=cfg.aero.extrapolation_method,
         grid_points=[
             np.asarray(table_cfg.altitude_ft),
             table_cfg.mach,
         ],
         values=reynolds_values,
-        method=cfg.aero.interpolation_method,
     )
     return table(altitude / 0.3048, mach)
 
@@ -80,20 +81,22 @@ def _basic_coefficients(
     basic = cfg.aero.tables.basic_airframe
     cx_cz = fr.resource.interpolator(
         "basic_cx_cz",
+        method=cfg.aero.interpolation_method,
+        extrapolation=cfg.aero.extrapolation_method,
         grid_points=[
             basic.alpha_c2,
             basic.beta_c2,
             basic.reynolds_c2,
         ],
         values=basic.cx_cz,
-        method=cfg.aero.interpolation_method,
         n_out=2,
     )(alpha, beta, reynolds)
     lateral = fr.resource.interpolator(
         "basic_cy_cl_cm_cn",
+        method=cfg.aero.interpolation_method,
+        extrapolation=cfg.aero.extrapolation_method,
         grid_points=[basic.alpha_c4, basic.beta_c4],
         values=basic.cy_cl_cm_cn,
-        method=cfg.aero.interpolation_method,
         n_out=4,
     )(alpha, beta)
     return (
@@ -153,6 +156,8 @@ def _control_coefficients(
     control = cfg.aero.tables.control_surfaces
     elevator_table = fr.resource.interpolator(
         "elevator",
+        method=cfg.aero.interpolation_method,
+        extrapolation=cfg.aero.extrapolation_method,
         grid_points=[
             control.alpha_elevator,
             control.beta_elevator,
@@ -160,29 +165,30 @@ def _control_coefficients(
             control.elevator,
         ],
         values=control.elevator_data,
-        method=cfg.aero.interpolation_method,
         n_out=3,
     )
     aileron_table = fr.resource.interpolator(
         "aileron",
+        method=cfg.aero.interpolation_method,
+        extrapolation=cfg.aero.extrapolation_method,
         grid_points=[
             control.alpha_aileron,
             control.beta_aileron,
             control.aileron,
         ],
         values=control.aileron_data,
-        method=cfg.aero.interpolation_method,
         n_out=6,
     )
     rudder_table = fr.resource.interpolator(
         "rudder",
+        method=cfg.aero.interpolation_method,
+        extrapolation=cfg.aero.extrapolation_method,
         grid_points=[
             control.alpha_rudder,
             control.beta_rudder,
             control.rudder,
         ],
         values=control.rudder_data,
-        method=cfg.aero.interpolation_method,
         n_out=6,
     )
 
@@ -292,34 +298,38 @@ def _dynamic_coefficients(
     dynamic = cfg.aero.tables.dynamic_derivatives
     p_table = fr.resource.interpolator(
         "dynamic_p",
+        method=cfg.aero.interpolation_method,
+        extrapolation=cfg.aero.extrapolation_method,
         grid_points=[dynamic.alpha_p, dynamic.phat],
         values=dynamic.p,
-        method=cfg.aero.interpolation_method,
         n_out=3,
     )
     q_table = fr.resource.interpolator(
         "dynamic_q",
+        method=cfg.aero.interpolation_method,
+        extrapolation=cfg.aero.extrapolation_method,
         grid_points=[dynamic.alpha_q, dynamic.qhat],
         values=dynamic.q,
-        method=cfg.aero.interpolation_method,
         n_out=3,
     )
     r_table = fr.resource.interpolator(
         "dynamic_r",
+        method=cfg.aero.interpolation_method,
+        extrapolation=cfg.aero.extrapolation_method,
         grid_points=[dynamic.alpha_r, dynamic.rhat],
         values=dynamic.r,
-        method=cfg.aero.interpolation_method,
         n_out=3,
     )
     w_table = fr.resource.interpolator(
         "dynamic_w",
+        method=cfg.aero.interpolation_method,
+        extrapolation=cfg.aero.extrapolation_method,
         grid_points=[
             dynamic.alpha_w,
             dynamic.what,
             dynamic.beta_w,
         ],
         values=dynamic.w,
-        method=cfg.aero.interpolation_method,
         n_out=6,
     )
 
