@@ -1,8 +1,13 @@
 # fr_gtm
 
-GTM 使用独立的 `uv.lock` 与 `.venv`，暂时以 editable 方式依赖本地 `../../packages/fly_ruler`，SDK 源码修改可直接生效，不重新加入父 uv workspace。源码暂时继续由主仓 Git 管理。
+GTM 是[独立 Git 仓库](https://github.com/WindLX/fr_gtm)，使用自己的 `uv.lock` 与 `.venv`，固定依赖 PyPI 的 `fly-ruler==0.1.7`。可单独克隆，也可作为 FlyRuler 工作区的 `models/fr_gtm` 子模块使用；不依赖父仓源码或虚拟环境。
 
-在本目录运行：
+```bash
+git clone git@github.com:WindLX/fr_gtm.git
+cd fr_gtm
+```
+
+在仓库根目录运行：
 
 ```bash
 just setup        # 安装独立环境与开发依赖
@@ -13,7 +18,7 @@ just build        # 构建 wheel 和 sdist
 
 CPU JAX 使用 `uv sync --extra jax`；CUDA 后端使用 `jax-cuda12` 或 `jax-cuda13` extra。根工作区的 setup、fmt、check-models、test-models 不管理 GTM。
 
-手柄集成入口 `just setup-stick` / `just example-fly-stick` 仍显式使用同一主仓内的 proto/stick 源码，需保留对应目录。
+手柄集成入口 `just setup-stick` / `just example-fly-stick` 通过可选依赖从 PyPI 安装 `fly-stick` 与 `fly-ruler-proto-python`，无需检出它们的源码。
 
 模型章节正文位于本仓的 [用户手册](docs/guide/01-build.md)与[实现说明](docs/dev/01-architecture.md)，由 FlyRuler 文档站引用并生成包含源码片段和 API 的页面。
 

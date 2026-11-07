@@ -6,11 +6,12 @@ NASA Generic Transport Model 的 FlyRuler 实现，数值行为以冻结的 `gtm
 
 - **约定**：命令以 `just --list` 为准；安装/格式化/构建使用 `just setup` / `just fmt` / `just build`，测试用 `just test-one <path>`，项目门 `just check` / `just test` / `just pre-commit`。
 - **约定**：模型验收使用 `just example-inspect`、`just example-simulate`、`just example-backends`、`just example-trim`。
+- `docs/` —— 本仓用户与实现章节，FlyRuler 主站挂载这些正文
 - `tests/` —— 冻结 trajectory reference 与多 backend 回归
 
 ## 本目录特有边界
 
-- **必须**：依赖、锁文件、虚拟环境和验证从本项目解析，暂时以 path/editable 方式使用 `../../packages/fly_ruler`，不借用根虚拟环境。
+- **必须**：依赖、锁文件、虚拟环境和验证从本仓解析，固定使用 PyPI 的 `fly-ruler==0.1.7`，不借用父工作区的源码或虚拟环境。
 
 - **必须**：`gtm_ad` 仅用于生成冻结 `.npz` reference；常规测试不依赖外部 checkout。
 - **必须**：保持 full-scale/scale model、四种 flap/gear 构型、表格方向与单位转换一致。

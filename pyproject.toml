@@ -6,24 +6,23 @@ readme = "README.md"
 authors = [{ name = "windlx", email = "1418043337@qq.com" }]
 requires-python = ">=3.12"
 dependencies = [
-    "fly-ruler",
+    "fly-ruler==0.1.7",
     "numpy",
     "pydantic>=2.13.4",
     "typer>=0.25.1",
 ]
 
 [project.optional-dependencies]
-jax = ["jax>=0.8.2", "fly-ruler[jax]"]
-jax-cuda12 = ["fly-ruler[jax-cuda12]"]
-jax-cuda13 = ["fly-ruler[jax-cuda13]"]
-stick = ["fly-stick"]
-proto = ["fly-ruler-proto-python"]
+jax = ["fly-ruler[jax]==0.1.7"]
+jax-cuda12 = ["fly-ruler[jax-cuda12]==0.1.7"]
+jax-cuda13 = ["fly-ruler[jax-cuda13]==0.1.7"]
+stick = ["fly-stick>=0.1.2"]
+proto = ["fly-ruler-proto-python>=0.4.0"]
 all = ["fr-gtm[jax,stick,proto]"]
 
-[tool.uv.sources]
-fly-ruler = { path = "../../packages/fly_ruler", editable = true }
-fly-stick = { path = "../../packages/fly_stick", editable = true }
-fly-ruler-proto-python = { path = "../../packages/fly_ruler_proto/bindings/python", editable = true }
+[project.urls]
+Repository = "https://github.com/WindLX/fr_gtm"
+Issues = "https://github.com/WindLX/fr_gtm/issues"
 
 [dependency-groups]
 dev = [

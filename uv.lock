@@ -152,7 +152,7 @@ wheels = [
 [[package]]
 name = "fly-ruler"
 version = "0.1.7"
-source = { editable = "../../packages/fly_ruler" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "casadi" },
     { name = "filelock" },
@@ -169,6 +169,11 @@ dependencies = [
     { name = "typer" },
     { name = "uvicorn" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/8b/52/b2dbe75ebdf094b0062039ea860eb0bd875624b767095d738adb90e776e3/fly_ruler-0.1.7.tar.gz", hash = "sha256:86d81bcf7670f6b0047d06b2a79545044bdf51dea83cb05e0e23545ef3121cbc", size = 1944734, upload-time = "2026-11-07T08:14:39.225Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/74/26/0c25f4c57d15f52614e66e0f21216f657dd28ae889d23e4ee10effde7a48/fly_ruler-0.1.7-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:eec8904fa584c0b2491790786b1c34232488c2091f7c8eea3d3a83ee69483bd0", size = 3982463, upload-time = "2026-11-07T08:14:31.026Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/c5/bf127dc0dea6b24dcff13595744a9ef123d71f96b886ae5aa9483f2b2522/fly_ruler-0.1.7-cp39-abi3-win_amd64.whl", hash = "sha256:098fcec37f8192825329488f75c6115336b7ae530e4a94f43da0dd671c04cf71", size = 3670233, upload-time = "2026-11-07T08:14:35.443Z" },
+]
 
 [package.optional-dependencies]
 jax = [
@@ -181,59 +186,24 @@ jax-cuda13 = [
     { name = "jax", extra = ["cuda13"] },
 ]
 
-[package.metadata]
-requires-dist = [
-    { name = "casadi", specifier = ">=3.8.1" },
-    { name = "filelock", specifier = ">=4.0.8" },
-    { name = "jax", marker = "extra == 'all'", specifier = ">=0.11.2" },
-    { name = "jax", marker = "extra == 'jax'", specifier = ">=0.11.2" },
-    { name = "jax", extras = ["cuda12"], marker = "extra == 'jax-cuda12'", specifier = ">=0.11.2" },
-    { name = "jax", extras = ["cuda13"], marker = "extra == 'jax-cuda13'", specifier = ">=0.11.2" },
-    { name = "jinja2", specifier = ">=3.1.6" },
-    { name = "numpy", specifier = ">=2.5.3" },
-    { name = "polars", specifier = ">=1.44.2" },
-    { name = "pybind11", specifier = ">=3.1.0" },
-    { name = "pydantic", specifier = ">=2.13.5" },
-    { name = "rich", specifier = ">=15.0.0" },
-    { name = "scipy", specifier = ">=1.18.1" },
-    { name = "starlette", specifier = ">=0.47" },
-    { name = "torch", marker = "extra == 'all'", specifier = ">=2.6" },
-    { name = "torch", marker = "extra == 'torch'", specifier = ">=2.6" },
-    { name = "tree-sitter", specifier = ">=0.25.2,<0.26" },
-    { name = "tree-sitter-c", specifier = ">=0.24" },
-    { name = "typer", specifier = ">=0.27.2" },
-    { name = "uvicorn", specifier = ">=0.35" },
-]
-provides-extras = ["jax", "jax-cuda12", "jax-cuda13", "torch", "all"]
-
 [[package]]
 name = "fly-ruler-proto-python"
-source = { editable = "../../packages/fly_ruler_proto/bindings/python" }
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "maturin", specifier = ">=1.7" },
-    { name = "mypy", specifier = ">=2.0.0" },
-    { name = "patchelf", marker = "sys_platform == 'linux'", specifier = ">=0.17" },
-    { name = "pytest", specifier = ">=9.1.0" },
-    { name = "ruff", specifier = ">=0.14.0" },
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c1/a9/a8e0e83a0b31f7e4584101f8df914e76d1b924feb61b1b156af8e81b5e4a/fly_ruler_proto_python-0.4.0-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:84274cf668a9a855c9d5816a718fecdc16135080ab393e0f6fe4b97eb700726b", size = 1414939, upload-time = "2026-10-02T10:44:11.09Z" },
+    { url = "https://files.pythonhosted.org/packages/80/73/eec51890f63218fefcfd1e49ff62b079b362a481660d732e129a1bf5ce94/fly_ruler_proto_python-0.4.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d31bf6f8f80fa20713307f562f69beb924097977c836fff4ca22837797c7ff0b", size = 1766436, upload-time = "2026-10-02T10:44:12.544Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/a0/b73ae2025c4dcc67aae07473e218e83fd177bb1e98742dcfbae60c7e9c20/fly_ruler_proto_python-0.4.0-cp39-abi3-win_amd64.whl", hash = "sha256:f917c442f6ad0e906210ac2c272f373609fdaaa02b6764e159a7eb7bc5a52b7e", size = 1174771, upload-time = "2026-10-02T10:44:14.001Z" },
 ]
 
 [[package]]
 name = "fly-stick"
 version = "0.1.2"
-source = { editable = "../../packages/fly_stick" }
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "maturin", specifier = ">=1.0,<2.0" },
-    { name = "mypy", specifier = ">=2.0.0" },
-    { name = "pytest", specifier = ">=9.0.2" },
-    { name = "ruff", specifier = ">=0.11.0" },
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fe/2c/d71ca9f48b14d03145f0122fa3fa9aad1574190edb996ea3a545b7ee6f42/fly_stick-0.1.2.tar.gz", hash = "sha256:cf2d8774e2f8302bffced1a9d3415d92c445e620f01e7a57aa7febe89a2881e3", size = 22497343, upload-time = "2026-10-02T15:41:23.87Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/db/ee/0c734391ac174b84b48d39d4ba51a433ca847bcba02428c9b046f8f2807e/fly_stick-0.1.2-cp39-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:3675ff23251f2e535869df250a63e31f957ff21917f0694c763ac25ea17e2c9a", size = 820233, upload-time = "2026-10-02T15:41:19.889Z" },
+    { url = "https://files.pythonhosted.org/packages/20/e4/54b4854f30e71cf8f7f6af3dc3028e0c3e6f28cbc227db04c6d7c54724da/fly_stick-0.1.2-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:6eb8b4f8ece84c3b35b3647d500398aae7a666f89e81b5fdd957f35536dfa4c0", size = 811513, upload-time = "2026-10-02T15:41:21.675Z" },
 ]
 
 [[package]]
@@ -252,11 +222,9 @@ all = [
     { name = "fly-ruler", extra = ["jax"] },
     { name = "fly-ruler-proto-python" },
     { name = "fly-stick" },
-    { name = "jax" },
 ]
 jax = [
     { name = "fly-ruler", extra = ["jax"] },
-    { name = "jax" },
 ]
 jax-cuda12 = [
     { name = "fly-ruler", extra = ["jax-cuda12"] },
@@ -281,14 +249,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fly-ruler", editable = "../../packages/fly_ruler" },
-    { name = "fly-ruler", extras = ["jax"], marker = "extra == 'jax'", editable = "../../packages/fly_ruler" },
-    { name = "fly-ruler", extras = ["jax-cuda12"], marker = "extra == 'jax-cuda12'", editable = "../../packages/fly_ruler" },
-    { name = "fly-ruler", extras = ["jax-cuda13"], marker = "extra == 'jax-cuda13'", editable = "../../packages/fly_ruler" },
-    { name = "fly-ruler-proto-python", marker = "extra == 'proto'", editable = "../../packages/fly_ruler_proto/bindings/python" },
-    { name = "fly-stick", marker = "extra == 'stick'", editable = "../../packages/fly_stick" },
+    { name = "fly-ruler", specifier = "==0.1.7" },
+    { name = "fly-ruler", extras = ["jax"], marker = "extra == 'jax'", specifier = "==0.1.7" },
+    { name = "fly-ruler", extras = ["jax-cuda12"], marker = "extra == 'jax-cuda12'", specifier = "==0.1.7" },
+    { name = "fly-ruler", extras = ["jax-cuda13"], marker = "extra == 'jax-cuda13'", specifier = "==0.1.7" },
+    { name = "fly-ruler-proto-python", marker = "extra == 'proto'", specifier = ">=0.4.0" },
+    { name = "fly-stick", marker = "extra == 'stick'", specifier = ">=0.1.2" },
     { name = "fr-gtm", extras = ["jax", "stick", "proto"], marker = "extra == 'all'" },
-    { name = "jax", marker = "extra == 'jax'", specifier = ">=0.8.2" },
     { name = "numpy" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "typer", specifier = ">=0.25.1" },
