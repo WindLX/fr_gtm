@@ -9,7 +9,6 @@ dependencies = [
     "fly-ruler",
     "numpy",
     "pydantic>=2.13.4",
-    "rtoml>=0.13.0",
     "typer>=0.25.1",
 ]
 
@@ -17,13 +16,22 @@ dependencies = [
 jax = ["jax>=0.8.2", "fly-ruler[jax]"]
 jax-cuda12 = ["fly-ruler[jax-cuda12]"]
 jax-cuda13 = ["fly-ruler[jax-cuda13]"]
-all = ["fr-gtm[jax]"]
+stick = ["fly-stick"]
+proto = ["fly-ruler-proto-python"]
+all = ["fr-gtm[jax,stick,proto]"]
 
 [tool.uv.sources]
-"fly-ruler" = { workspace = true }
+fly-ruler = { path = "../../packages/fly_ruler", editable = true }
+fly-stick = { path = "../../packages/fly_stick", editable = true }
+fly-ruler-proto-python = { path = "../../packages/fly_ruler_proto/bindings/python", editable = true }
 
 [dependency-groups]
-dev = ["mypy>=2.0.0", "pytest>=9.0.2", "ruff>=0.11.0"]
+dev = [
+    "mypy>=2.0.0",
+    "pytest>=9.0.2",
+    "ruff>=0.11.0",
+    "scipy-stubs>=1.18.1.1",
+]
 
 [build-system]
 requires = ["uv_build>=0.11.11,<0.12.0"]
@@ -63,5 +71,11 @@ exclude = ["tests/generate_gtm_backend_reference.py"]
 follow_imports_for_stubs = true
 
 [[tool.mypy.overrides]]
-module = ["fly_ruler_proto_python", "fly_stick", "jax", "jax.*"]
+module = ["jax", "jax.*"]
 ignore_missing_imports = true
+
+# 其他依赖继续从官方 PyPI 解析。
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true

@@ -8,16 +8,14 @@ import fly_ruler_core as fr
 import numpy as np
 import pytest
 
-from fr_gtm import GTMConfig, GTMSystem, build_initial_state
-
-torch = pytest.importorskip("torch")
+from fr_gtm import GTMConfig, GTMSystem, init
 
 
 @pytest.fixture(scope="module")
 def reference() -> fr.CasadiModel:
     """CPU/CUDA 与两种精度复用同一只读 FP64 对照模型。"""
     return fr.Compiler(fr.CompilerSpec(integrator="rk4", cache_policy="off")).compile(
-        GTMSystem.build("Root", GTMConfig.default())
+        GTMSystem.build("Root", GTMConfig.fullscale())
     )
 
 
@@ -26,15 +24,24 @@ def reference() -> fr.CasadiModel:
 def test_gtm_torch_endpoint_batch_and_gradient(
     device: str, dtype: Literal["float32", "float64"], reference: fr.CasadiModel
 ) -> None:
+    torch = pytest.importorskip("torch")
     if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA is not available")
-    cfg = GTMConfig.default()
+    cfg = GTMConfig.fullscale()
     compiler = fr.Compiler(fr.CompilerSpec(integrator="rk4", cache_policy="off"))
     model = compiler.compile(
         GTMSystem.build("Root", cfg),
         target=fr.targets.TorchTarget(device=device, dtype=dtype),
     )
-    initial = build_initial_state(reference, cfg, throttle=40.0).reshape(-1)
+    initial = reference.to_numpy(
+        init(
+            reference,
+            cfg,
+            position=(0.0, 0.0, 0.0),
+            airdata=(0.0, 0.0, 50.0),
+            command=(0.0, 0.0, 0.0, 40.0),
+        )[0]
+    ).reshape(-1)
     x = model.backend.array(initial, (model.n_x,)).requires_grad_()
     u = model.u.build({"Root::u": [1.0, -0.5, 0.3, 40.0]}).requires_grad_()
     p = model.p.build()

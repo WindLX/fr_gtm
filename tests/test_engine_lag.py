@@ -25,8 +25,8 @@ import fly_ruler_core as fr
 import numpy as np
 import pytest
 
-from fr_gtm import EngineLagConfig, GTMConfig
-from fr_gtm.blocks import Engine
+from fr_gtm import GTMConfig, JetCatThrottleLagConfig
+from fr_gtm.components.engine import Engine
 
 _DT = 0.005
 """积分步长，取小是为让四阶 Runge-Kutta 的误差远低于解析比对的容差。"""
@@ -35,21 +35,23 @@ _ANALYTIC_RTOL = 1.0e-6
 """数值解与解析解在采样点上的相对容差。"""
 
 
-def _lag() -> EngineLagConfig:
+def _lag() -> JetCatThrottleLagConfig:
     """全尺寸与缩比共用同一份滞后动态，因此默认配置即可代表两者。"""
-    return EngineLagConfig()
+    return JetCatThrottleLagConfig()
 
 
 @lru_cache(maxsize=None)
 def _engine_only(time_scale: float) -> tuple[GTMConfig, Any]:
     """编译只含 `Engine` 块的最小系统，便于单独观察有效油门。"""
 
-    cfg = GTMConfig.default()
-    cfg.engine.lag = EngineLagConfig(time_scale=time_scale)
+    cfg = GTMConfig.fullscale()
+    cfg.engine = cfg.engine.model_copy(
+        update={"lag": JetCatThrottleLagConfig(time_scale=time_scale)}
+    )
 
     @fr.system
     def EngineOnly() -> None:
-        engine = Engine("engine", cfg)
+        engine = Engine("engine", cfg.engine)
         throttle_command = fr.input("throttle_command", (1,))
         omega_body = fr.input("omega_body", (3,))
         pressure_ratio = fr.input("pressure_ratio", (1,))
@@ -79,7 +81,7 @@ def _simulate(
     cfg, model = _engine_only(time_scale)
     x = model.x.build(
         {
-            "Root.engine::lag_state": np.asarray(
+            "Root.engine.lag::lag_state": np.asarray(
                 cfg.engine.lag.trim_state(initial_throttle), dtype=float
             )
         }
@@ -108,7 +110,7 @@ def _simulate(
 
 
 def _analytic_step(
-    lag: EngineLagConfig,
+    lag: JetCatThrottleLagConfig,
     *,
     amplitude: float,
     times: tuple[float, ...],
@@ -145,7 +147,7 @@ def test_analytic_step_matches_numerical_integration() -> None:
 @pytest.mark.parametrize("fullscale", [False, True])
 def test_second_order_lag_matches_original_jetcat_matrices(fullscale: bool) -> None:
     """独立固定原始 SLX 左右 Jetcat P70 Mask 的系数，不从当前配置推导参考。"""
-    lag = EngineLagConfig()
+    lag = JetCatThrottleLagConfig()
     np.testing.assert_array_equal(lag.state_matrix, [-1.336, -0.7314, 1.0, 0.0])
     np.testing.assert_array_equal(lag.input_matrix, [1.0, 0.0])
     np.testing.assert_array_equal(lag.output_matrix, [-0.1474, 0.7314])
@@ -157,7 +159,7 @@ def test_command_changes_rates_without_direct_feedthrough_into_loads() -> None:
     """固定内部状态时指令只改变导数，推力读取未裁切的有效油门。"""
     _, model = _engine_only(1.0)
     state = np.array([10.0, 0.0])
-    x = model.x.build({"Root.engine::lag_state": state})
+    x = model.x.build({"Root.engine.lag::lag_state": state})
     previous_force: np.ndarray | None = None
     for command in (-50.0, 25.0, 150.0):
         u = model.u.build(
@@ -174,7 +176,7 @@ def test_command_changes_rates_without_direct_feedthrough_into_loads() -> None:
         outputs = model.y.read(y, by="path")
         np.testing.assert_allclose(outputs["Root::effective_throttle"], [-1.474])
         np.testing.assert_allclose(
-            model.xdot.read(rates, by="path")["Root.engine::lag_state"],
+            model.xdot.read(rates, by="path")["Root.engine.lag::lag_state"],
             [-13.36 + np.clip(command, 0.0, 100.0), 10.0],
         )
         force = np.asarray(outputs["Root::force"])
@@ -236,7 +238,9 @@ def test_ten_to_ninety_rise_time_matches_documented_response() -> None:
     assert crossing(0.90) - crossing(0.10) == pytest.approx(2.774, rel=2.0e-3)
 
 
-def _zero_order_hold(lag: EngineLagConfig, dt: float) -> tuple[np.ndarray, np.ndarray]:
+def _zero_order_hold(
+    lag: JetCatThrottleLagConfig, dt: float
+) -> tuple[np.ndarray, np.ndarray]:
     """分段常值命令的精确离散推进矩阵 `Φ=e^{AΔt/c}`、`Γ=-A⁻¹(I-Φ)B`。"""
 
     matrix = np.asarray(lag.state_matrix, dtype=float).reshape(2, 2)
@@ -251,12 +255,12 @@ def test_piecewise_constant_command_matches_exact_step() -> None:
     """分段常值命令下，数值推进逐步等于 `Φ x + Γ u` 的精确递推。"""
 
     cfg, model = _engine_only(1.0)
-    assert isinstance(cfg.engine.lag, EngineLagConfig)
+    assert isinstance(cfg.engine.lag, JetCatThrottleLagConfig)
     transition, gain = _zero_order_hold(cfg.engine.lag, _DT)
     commands = (0.0, 0.0, 35.0, 35.0, 35.0, 80.0, 80.0, 20.0, 20.0, 20.0, 100.0)
     x = model.x.build(
         {
-            "Root.engine::lag_state": np.asarray(
+            "Root.engine.lag::lag_state": np.asarray(
                 cfg.engine.lag.trim_state(0.0), dtype=float
             )
         }
@@ -264,7 +268,7 @@ def test_piecewise_constant_command_matches_exact_step() -> None:
     xd = model.xd.build()
     p = model.p.build()
     expected = np.asarray(
-        model.x.read(x, by="path")["Root.engine::lag_state"], dtype=float
+        model.x.read(x, by="path")["Root.engine.lag::lag_state"], dtype=float
     )
     for step, command in enumerate(commands):
         u = model.u.build(
@@ -278,7 +282,7 @@ def test_piecewise_constant_command_matches_exact_step() -> None:
         x, xd, _, _ = model.discrete_fn(step * _DT, x, xd, u, p)
         expected = transition @ expected + gain * command
         actual = np.asarray(
-            model.x.read(x, by="path")["Root.engine::lag_state"], dtype=float
+            model.x.read(x, by="path")["Root.engine.lag::lag_state"], dtype=float
         )
         np.testing.assert_allclose(actual, expected, rtol=1.0e-9, atol=1.0e-12)
 
@@ -351,14 +355,14 @@ def test_lag_config_rejects_shapes_and_non_unity_dc_gain() -> None:
     """配置校验拦住维度错误、上下限倒置与直流增益不为 1 的矩阵组。"""
 
     with pytest.raises(ValueError, match="state_matrix"):
-        EngineLagConfig(state_matrix=[1.0, 2.0, 3.0])
+        JetCatThrottleLagConfig(state_matrix=[1.0, 2.0, 3.0])
     with pytest.raises(ValueError, match="input_matrix"):
-        EngineLagConfig(input_matrix=[1.0, 0.0, 0.0])
+        JetCatThrottleLagConfig(input_matrix=[1.0, 0.0, 0.0])
     with pytest.raises(ValueError, match="output_matrix"):
-        EngineLagConfig(output_matrix=[1.0])
+        JetCatThrottleLagConfig(output_matrix=[1.0])
     with pytest.raises(ValueError, match="lower"):
-        EngineLagConfig(command_lower=50.0, command_upper=40.0)
+        JetCatThrottleLagConfig(command_lower=50.0, command_upper=40.0)
     with pytest.raises(ValueError, match="DC gain"):
-        EngineLagConfig(output_matrix=[-0.1474, 0.9])
+        JetCatThrottleLagConfig(output_matrix=[-0.1474, 0.9])
     with pytest.raises(ValueError):
-        EngineLagConfig(time_scale=0.0)
+        JetCatThrottleLagConfig(time_scale=0.0)

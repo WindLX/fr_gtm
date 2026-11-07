@@ -19,46 +19,32 @@ scalar-first；三个舵面位置为 [升降舵, 副翼, 方向舵]（度），�
 from importlib.util import find_spec
 from pathlib import Path
 from time import perf_counter
-from typing import TypeVar
 
 import fly_ruler_core as fr
 import numpy as np
 
-from fr_gtm import GTMConfig, GTMSystem
+from fr_gtm import GTMConfig, GTMSystem, init
 
 ROOT = Path(__file__).resolve().parent.parent
-ArrayT = TypeVar("ArrayT")
-# 40% 油门对应的发动机滞后配平状态，供各后端的固定工作点共用。
-LAG_STATE_40 = GTMConfig.default().engine.lag.trim_state(40.0)
 
 
-def _evaluate(model: fr.CompiledModel[ArrayT]) -> tuple[np.ndarray, np.ndarray]:
-    """装配固定状态与输入，返回一次连续求值的 xdot 与 y 扁平向量。"""
-    # 状态取 1000 m 高度（NED 下向为 -1000）、机体系速度 100 m/s 前向加 5 m/s 下向分量、
-    # 零姿态；舵面取升降舵 -2 度、副翼 1 度、方向舵 0 度，油门指令 40%，
-    # 发动机滞后状态取 40% 对应的配平值。
-    # 未列出的状态分量（角速度、Dryden 阵风等）由 build 默认为零。
-    x = model.x.build(
-        {
-            "Root.eom::pos_ned": [0.0, 0.0, -1000.0],
-            "Root.eom::vel_body": [100.0, 0.0, 5.0],
-            "Root.eom::quat": [1.0, 0.0, 0.0, 0.0],
-            "Root.actuator::position": [-2.0, 1.0, 0.0],
-            "Root.engine::lag_state": LAG_STATE_40,
-        }
+def _evaluate[T](
+    model: fr.CompiledModel[T], cfg: GTMConfig
+) -> tuple[np.ndarray, np.ndarray]:
+    """用同一组物理初值装配各后端，返回主机 xdot/y 向量。"""
+    x, xd, u, p = init(
+        model,
+        cfg,
+        position=(0.0, 0.0, -1000.0),
+        airdata=(
+            float(np.rad2deg(np.arctan2(5.0, 100.0))),
+            0.0,
+            float(np.hypot(100.0, 5.0)),
+        ),
+        command=(-2.0, 1.0, 0.0, 40.0),
     )
-    u = model.u.build(
-        {
-            "Root::u": [-2.0, 1.0, 0.0, 40.0],
-            "Root::d": np.zeros(4),
-            "Root::n": np.zeros(21),
-        }
-    )
-    xdot, _, y, _ = model.continuous_fn(0.0, x, model.xd.build(), u, model.p.default())
-    return (
-        np.asarray(xdot, dtype=float).reshape(-1),
-        np.asarray(y, dtype=float).reshape(-1),
-    )
+    result = model.continuous_fn(0.0, x, xd, u, p)
+    return model.to_numpy(result.xdot).reshape(-1), model.to_numpy(result.y).reshape(-1)
 
 
 def main() -> None:
@@ -89,14 +75,17 @@ def main() -> None:
                 integrator="euler", dt=0.01, artifact_dir=ROOT / "build" / "flyruler"
             )
         )
-        builder = GTMSystem.build("Root", GTMConfig.default())
+        cfg = GTMConfig.fullscale()
+        builder = GTMSystem.build("Root", cfg)
         # 走到最后的分支时 name 只能是 jax，因为清单由上面的可用性检查生成。
         if name == "numpy":
-            xdot, y = _evaluate(compiler.compile(builder, target=fr.targets.numpy))
+            xdot, y = _evaluate(compiler.compile(builder, target=fr.targets.numpy), cfg)
         elif name == "casadi":
-            xdot, y = _evaluate(compiler.compile(builder, target=fr.targets.casadi))
+            xdot, y = _evaluate(
+                compiler.compile(builder, target=fr.targets.casadi), cfg
+            )
         else:
-            xdot, y = _evaluate(compiler.compile(builder, target=fr.targets.jax))
+            xdot, y = _evaluate(compiler.compile(builder, target=fr.targets.jax), cfg)
         compile_ms = (perf_counter() - started) * 1000.0
         results[name] = (
             compile_ms,

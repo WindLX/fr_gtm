@@ -37,7 +37,7 @@ def _definition(grids: list[fr.NumpyArray], values: fr.NumpyArray) -> fr.PyIrBui
 
 
 def test_real_control_tables_mixed_ad_matches_cell_local_difference() -> None:
-    control = GTMConfig.default().aero.tables.control_surfaces
+    control = GTMConfig.fullscale().aero.tables.control_surfaces
     tables = [
         (
             [

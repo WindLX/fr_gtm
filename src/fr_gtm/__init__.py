@@ -1,55 +1,78 @@
 """NASA Generic Transport Model（GTM）的 FlyRuler 实现。
 
-本包导出 pydantic 配置类、状态与控制维度常量、空速角投影助手，以及
-默认 25 状态的 `GTMSystem` 根系统和两个初始状态构造函数。角度对外使用度（deg），
+本包提供组件配置、GTMSystem、路径目录、直接初值构造、观测解析与配平工具。角度对外使用度（deg），
 内部动力学使用弧度（rad）；`is_fullscale` 与 `mode` 是编译期配置。
 """
 
 from .config import (
     ActuatorConfig,
     AeroConfig,
-    AeroForceMomentConfig,
     AircraftConfig,
-    ControlSurfacesConfig,
-    DynamicDerivativesConfig,
     EngineConfig,
-    EngineLagConfig,
-    FirstOrderEngineLagConfig,
+    EngineLoadsConfig,
+    FirstOrderThrottleLagConfig,
     GTMConfig,
+    JetCatThrottleLagConfig,
     Mode,
     SensorConfig,
     SensorSingleConfig,
-    UncertaintyConfig,
     WindConfig,
 )
-from .constants import DDIM, NDIM, PDIM, UDIM, XDIM, YDIM
-from .proto_projection import airdata_angles_to_proto_radians
-from .system import GTMSystem, build_ground_initial_state, build_initial_state
+from .init import (
+    Initializer,
+    Observation,
+    Uncertainty,
+    build_input,
+    init,
+    read_observation,
+    sample_disturbance,
+    sample_sensor_noise,
+)
+from .layout import (
+    D_DIM,
+    D_INDEX,
+    N_DIM,
+    N_INDEX,
+    U_DIM,
+    U_INDEX,
+    Y_DIM,
+    Y_INDEX,
+    GTMPaths,
+)
+from .system import GTMSystem
+from .trim import GTMTrimResult, trim
 
 __all__ = [
     "ActuatorConfig",
     "AeroConfig",
-    "AeroForceMomentConfig",
     "AircraftConfig",
-    "ControlSurfacesConfig",
-    "DDIM",
-    "DynamicDerivativesConfig",
     "EngineConfig",
-    "EngineLagConfig",
-    "FirstOrderEngineLagConfig",
+    "EngineLoadsConfig",
+    "JetCatThrottleLagConfig",
+    "FirstOrderThrottleLagConfig",
     "GTMConfig",
     "GTMSystem",
+    "trim",
+    "GTMTrimResult",
+    "init",
+    "Initializer",
+    "build_input",
+    "sample_disturbance",
+    "sample_sensor_noise",
+    "read_observation",
+    "Observation",
+    "Uncertainty",
+    "GTMPaths",
+    "U_INDEX",
+    "U_DIM",
+    "D_INDEX",
+    "D_DIM",
+    "Y_INDEX",
+    "Y_DIM",
+    "N_INDEX",
+    "N_DIM",
     "Mode",
-    "NDIM",
-    "PDIM",
     "SensorConfig",
     "SensorSingleConfig",
-    "UDIM",
-    "UncertaintyConfig",
     "WindConfig",
-    "XDIM",
-    "YDIM",
-    "airdata_angles_to_proto_radians",
-    "build_ground_initial_state",
-    "build_initial_state",
 ]

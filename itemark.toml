@@ -1,0 +1,39 @@
+language = "zh-CN"
+root = "itemark-records"
+
+[[groups]]
+name = "general"
+
+[[kinds]]
+name = "work"
+description = "可继续推进的工作事项"
+template = "templates/work.md"
+required_sections = ["目标", "验收"]
+completion_field = "status"
+completion_values = ["done"]
+fields = [
+  { name = "title", type = "string", required = true },
+  { name = "status", type = "enum", required = true, values = ["todo", "in_progress", "blocked", "done"] },
+  { name = "completion_note", type = "string" },
+  { name = "completion_evidence", type = "string" },
+]
+
+[[kinds]]
+name = "fact"
+description = "有来源的事实陈述"
+template = "templates/fact.md"
+required_sections = ["事实陈述", "来源"]
+fields = [
+  { name = "title", type = "string", required = true },
+  { name = "verification", type = "enum", required = true, values = ["unverified", "verified", "disputed"] },
+]
+
+[[kinds]]
+name = "term"
+description = "需要简明定义的术语"
+template = "templates/term.md"
+required_sections = ["定义"]
+fields = [
+  { name = "title", type = "string", required = true },
+  { name = "aliases", type = "string" },
+]

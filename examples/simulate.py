@@ -18,10 +18,9 @@ scalar-first；三个舵面位置为 [升降舵, 副翼, 方向舵]（度），�
 from pathlib import Path
 
 import fly_ruler_core as fr
-import numpy as np
 from fly_ruler_std.runtime.record import Recorder
 
-from fr_gtm import GTMConfig, GTMSystem
+from fr_gtm import GTMConfig, GTMSystem, init, read_observation
 
 
 # #region gtm-1
@@ -29,7 +28,7 @@ def main() -> None:
     """用默认配置推进一步长为 100 步的标称仿真并落盘。"""
     # #region 01-build-1
     # 默认配置为全尺寸、NORMAL 构型且关闭地面接触；编译到 CasADi 后端。
-    cfg = GTMConfig.default()
+    cfg = GTMConfig.fullscale()
     builder = GTMSystem.build("Root", cfg)
     model = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=0.01)).compile(
         builder, target=fr.targets.casadi
@@ -39,28 +38,18 @@ def main() -> None:
     # 状态用完整路径装配：NED 下向 -1000 即 1000 m 高度，速度在机体系 FRD。
     # 作动器位置与输入指令一致，三元素依次为升降舵、副翼与方向舵；发动机的
     # 滞后状态取 40% 油门对应的配平值，避免起点出现人为推力暂态。
-    x = model.x.build(
-        {
-            "Root.eom::pos_ned": [0.0, 0.0, -1000.0],
-            "Root.eom::vel_body": [100.0, 0.0, 0.0],
-            "Root.eom::quat": [1.0, 0.0, 0.0, 0.0],
-            "Root.actuator::position": [0.0, 0.0, 0.0],
-            "Root.engine::lag_state": cfg.engine.lag.trim_state(40.0),
-        }
-    )
-    u = model.u.build(
-        {
-            "Root::u": [0.0, 0.0, 0.0, 40.0],
-            "Root::d": np.zeros(4),
-            "Root::n": np.zeros(21),
-        }
+    x, xd, u, p = init(
+        model,
+        cfg,
+        position=(0.0, 0.0, -1000.0),
+        airdata=(0.0, 0.0, 100.0),
+        euler=(0.0, 0.0, 0.0),
+        command=(0.0, 0.0, 0.0, 40.0),
     )
     # #endregion 02-state-input-1
-    # p.build() 不覆盖任何参数，因此风、不确定度与作动器偏置都保持标称值。
-    p = model.p.build()
+    # 未提供 wind/uncertainty，参数保持标称值。
     # #region 03-simulate-1
-    # 模型没有离散状态，xd 仍需显式构造并随每一步回传。
-    xd = model.xd.build()
+    # init 已构造空离散状态 xd，每一步仍需传入并回传。
     # #region 03-simulate-2
     # Recorder 绑定模型以确定列布局；discrete_fn 推进一步并返回新状态与输出。
     output_dir = Path("results") / "gtm_nominal"
@@ -84,14 +73,13 @@ def main() -> None:
             effect=effects,
         )
     recorder.save("nominal")
-    # 按完整路径回读末态输出，高度与空速取自 21 通道 y 的对应分量。
-    final = model.y.read(y, by="path")
+    # 按完整路径回读末态输出，高度与空速取自 17 通道 y 的对应分量。
+    final = read_observation(model, y)
     print(f"saved: {output_dir / 'nominal.parquet'}")
-    altitude = model.to_numpy(final["Root::altitude"]).reshape(-1)[0]
-    print(f"final altitude: {altitude:.3f} m")
+    print(f"final altitude: {final.altitude_m:.3f} m")
     # #endregion 03-simulate-2
     # #endregion 03-simulate-1
-    print(f"final airspeed: {model.to_numpy(final['Root::V']).reshape(-1)[0]:.3f} m/s")
+    print(f"final airspeed: {final.tas_mps:.3f} m/s")
 
 
 # #endregion gtm-1

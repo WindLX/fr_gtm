@@ -12,27 +12,26 @@
 的法向力；takeoff 场景在速度达到 65 m/s 后抬前轮，touchdown 场景以 70 m/s、1.5 m/s
 下降率接地。
 
-约定：地面接触是编译期开关，必须用 GTMConfig.default(enable_ground=True)；位置取
+约定：地面接触是编译期开关，必须用 GTMConfig.fullscale(enable_ground=True)；位置取
 世界系 NED，速度在机体系 FRD，高度为 -pos_ned[2]，作动器指令末位为油门百分比。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, TypeVar
+from typing import Annotated
 
 import fly_ruler_core as fr
 import numpy as np
 import typer
+from fly_ruler_std.blocks.physics import solve_static_ground_pose
 from fly_ruler_std.runtime.record import Recorder
 
-from fr_gtm import GTMConfig, GTMSystem, build_ground_initial_state
-
-ArrayT = TypeVar("ArrayT")
+from fr_gtm import GTMConfig, GTMPaths, GTMSystem, build_input, init, read_observation
 
 
-def _run(
-    model: fr.CompiledModel[ArrayT],
+def _run[T](
+    model: fr.CompiledModel[T],
     cfg: GTMConfig,
     scenario: str,
     duration: float,
@@ -43,42 +42,40 @@ def _run(
     # #region 02-state-input-1
     # takeoff 从静止接地状态开始滑跑；touchdown 从 1 m 高度、70 m/s 前向速度、
     # 1.5 m/s 下降率开始接地，两种初值都让最低接地点贴近跑道参考面。
-    if scenario == "takeoff":
-        x = build_ground_initial_state(model, cfg, forward_speed_mps=0.0)
-    else:
-        x = build_ground_initial_state(
-            model,
-            cfg,
-            forward_speed_mps=70.0,
-            altitude_agl_m=1.0,
-            sink_rate_mps=1.5,
-        )
+    # std 提供静态接触姿态；将期望 NED 水平/下降速度旋到 FRD，再转为 alpha/beta/TAS。
+    down, roll, pitch = solve_static_ground_pose(cfg.ground, cfg.aircraft.w0)
+    cr, sr, cp, sp = np.cos(roll), np.sin(roll), np.cos(pitch), np.sin(pitch)
+    dcm = np.array([[cp, sr * sp, cr * sp], [0.0, cr, -sr], [-sp, sr * cp, cr * cp]])
+    ned = np.zeros(3) if scenario == "takeoff" else np.array([70.0, 0.0, 1.5])
+    body = dcm.T @ ned
+    alpha = np.rad2deg(np.arctan2(body[2], body[0]))
+    beta = np.rad2deg(np.arctan2(body[1], np.hypot(body[0], body[2])))
+    vectors = init(
+        model,
+        cfg,
+        position=(0.0, 0.0, down - (0.0 if scenario == "takeoff" else 1.0)),
+        airdata=(alpha, beta, float(np.linalg.norm(body))),
+        euler=(float(np.rad2deg(roll)), float(np.rad2deg(pitch)), 0.0),
+        command=(0.0, 0.0, 0.0, 0.0),
+    )
+    x, xd, _, p = (model.to_numpy(value).reshape(-1) for value in vectors)
+    paths = GTMPaths()
     # #endregion 02-state-input-1
-    # 显式转成 float 数组，避免不同后端返回类型在循环里混用。
-    xd = model.to_numpy(model.xd.build())
-    p = model.to_numpy(model.p.default())
     recorder = Recorder(model, output_dir)
     y: np.ndarray | None = None
+    effects = np.zeros(model.n_e)
     steps = max(1, round(duration / dt))
     # 每步按机体系速度模值决定指令：takeoff 到 65 m/s 时给 -5 度升降舵抬前轮并全油门，
     # touchdown 保持零升降舵与 25% 油门；这样可以复现一条确定的跑道轨迹。
     for step in range(steps):
-        velocity = model.x.read(x, by="path")["Root.eom::vel_body"]
+        velocity = model.x.read(x, by="path")[paths.x.vel_body]
         speed = float(np.linalg.norm(model.to_numpy(velocity)))
         command = (
             np.array([-5.0 if speed >= 65.0 else 0.0, 0.0, 0.0, 100.0])
             if scenario == "takeoff"
             else np.array([0.0, 0.0, 0.0, 25.0])
         )
-        u = model.to_numpy(
-            model.u.build(
-                {
-                    "Root::u": command,
-                    "Root::d": np.zeros(4),
-                    "Root::n": np.zeros(21),
-                }
-            )
-        )
+        u = model.to_numpy(build_input(model, command))
         discrete = model.discrete_fn
         if discrete is None:
             raise RuntimeError("model has no discrete function")
@@ -95,10 +92,12 @@ def _run(
     if y is None:
         raise RuntimeError("simulation produced no output")
     # 开启地面接触后输出里才有地面诊断通道，这里取高度与三个接地点的法向力。
-    outputs = model.y.read(y, by="path")
+    observation = read_observation(model, y)
     print(f"saved: {output_dir / f'{scenario}.parquet'}")
-    altitude = float(model.to_numpy(outputs["Root::altitude"]).reshape(-1)[0])
-    wheel_loads = model.to_numpy(outputs["Root::ground_normal_forces"]).reshape(-1)
+    altitude = observation.altitude_m
+    wheel_loads = model.to_numpy(
+        model.effects.read(effects, by="path")[paths.effects.ground_normal_forces]
+    ).reshape(-1)
     print(f"final altitude: {altitude:.3f} m")
     print("wheel loads:", wheel_loads)
 
@@ -125,7 +124,7 @@ def main(
     if scenario not in {"takeoff", "touchdown"}:
         raise typer.BadParameter("scenario must be takeoff or touchdown")
     # 地面接触是编译期开关，必须先在这里开启再构建系统，输出才会带地面诊断通道。
-    cfg = GTMConfig.default(enable_ground=True)
+    cfg = GTMConfig.fullscale(enable_ground=True)
     builder = GTMSystem.build("Root", cfg)
     # 按后端分别编译同一条 IR；每个分支保留自己的精确模型类型。
     if backend == "numpy":

@@ -7,74 +7,69 @@
 
     cd models/fr_gtm && just example-disturbances
 
-预期结果：打印机体系气流 `Root::uvw`、迎角与侧滑角，以及 clean_y、y 的前五个分量；
+预期结果：打印稳态风与阵风之和、迎角/侧滑角，以及 clean_y、y 的高度与真空速；
 两者在叠加传感器噪声后出现差异，说明噪声只进入带噪输出通道。
 
-约定：风参数为 wind_speed(m/s)、wind_direction(弧度，自 NED 北向顺时针)、
+约定：init 的 wind 为速度(m/s)、风向(度，自 NED 北向顺时针)、
 turbulence_level；不确定度参数是相对量，取 0 表示复现标称模型。
 """
 
 import fly_ruler_core as fr
 import numpy as np
 
-from fr_gtm import GTMConfig, GTMSystem
+from fr_gtm import (
+    GTMConfig,
+    GTMPaths,
+    GTMSystem,
+    build_input,
+    init,
+    read_observation,
+    sample_disturbance,
+    sample_sensor_noise,
+)
 
 
 def main() -> None:
     """装配风、不确定度与噪声输入，求一次连续输出并打印关键分量。"""
     # 默认配置为全尺寸、NORMAL 构型且不实例化地面接触；示例只关注气动与风响应。
-    cfg = GTMConfig.default()
+    cfg = GTMConfig.fullscale()
     builder = GTMSystem.build("Root", cfg)
     model = fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
         builder, target=fr.targets.casadi
     )
     # #region 04-scenarios-1
-    # 状态里额外给出 Dryden 阵风初值：u_gw 为 1 维，v_gw 与 w_gw 各 2 维，
-    # 即使湍流未开启这些状态仍留在状态向量中，因此需要显式构造。
-    x = model.x.build(
-        {
-            "Root.eom::pos_ned": [0.0, 0.0, -500.0],
-            "Root.eom::vel_body": [90.0, 0.0, 5.0],
-            "Root.eom::quat": [1.0, 0.0, 0.0, 0.0],
-            "Root.actuator::position": [-2.0, 0.0, 0.0],
-            "Root.engine::lag_state": cfg.engine.lag.trim_state(42.0),
-            "Root.wind.dryden::u_gw": [0.2],
-            "Root.wind.dryden::v_gw": [-0.1, 0.05],
-            "Root.wind.dryden::w_gw": [0.1, -0.05],
-        }
-    )
-    # #endregion 04-scenarios-1
-    # 输入分三层：四路作动器指令、四路 Dryden 白噪声驱动、21 路标准化传感器噪声。
-    u = model.u.build(
-        {
-            "Root::u": [-2.0, 0.0, 0.0, 42.0],
-            "Root::d": [0.4, -0.2, 0.3, -0.1],
-            "Root::n": np.linspace(-1.0, 1.0, 21),
-        }
-    )
+    # 来流、姿态和参数一次构造；Dryden 初态为零，激励从外部高斯噪声进入。
     # #region 02-state-input-1
-    # 参数覆盖分两组：风的速度、方向与湍流强度，以及重量与六个静态系数的相对偏差。
-    p = model.p.build(
-        {
-            "Root.wind.params::wind_speed": [12.0],
-            "Root.wind.params::wind_direction": [np.deg2rad(35.0)],
-            "Root.wind.params::turbulence_level": [3.0],
-            "Root.mass::weight_unc": [0.03],
-            "Root.aero::c_static_unc": np.linspace(-0.03, 0.03, 6),
-        }
+    x, xd, _, p = init(
+        model,
+        cfg,
+        position=(0.0, 0.0, -500.0),
+        airdata=(3.0, 0.0, 100.0),
+        command=(-2.0, 0.0, 0.0, 42.0),
+        wind=(12.0, 35.0, 3.0),
+        uncertainty={"weight": 0.03, "c_static": np.linspace(-0.03, 0.03, 6)},
+    )
+    rng = np.random.default_rng(42)
+    u = build_input(
+        model,
+        (-2.0, 0.0, 0.0, 42.0),
+        d=sample_disturbance(rng),
+        n=sample_sensor_noise(rng),
     )
     # #endregion 02-state-input-1
+    # #endregion 04-scenarios-1
     # #region 03-simulate-1
     # 只求一次连续输出：clean_y 为未经传感器噪声的真值，y 叠加了噪声与偏置。
-    _, _, y, _ = model.continuous_fn(0.0, x, model.xd.build(), u, p)
-    output = model.y.read(y, by="path")
-    print(f"body wind:  {model.to_numpy(output['Root::uvw'])}")
-    print(
-        f"alpha/beta: {model.to_numpy(output['Root::alpha']).reshape(-1)[0]:.3f}, "
-        f"{model.to_numpy(output['Root::beta']).reshape(-1)[0]:.3f} deg"
-    )
-    print(f"clean y[:5]: {model.to_numpy(output['Root::clean_y']).reshape(-1)[:5]}")
-    print(f"noisy y[:5]: {model.to_numpy(output['Root::y']).reshape(-1)[:5]}")
+    result = model.continuous_fn(0.0, x, xd, u, p)
+    diagnostics = model.effects.read(result.effects, by="path")
+    paths = GTMPaths()
+    wind = diagnostics[paths.effects.wind_steady] + diagnostics[paths.effects.wind_gust]
+    clean = read_observation(model, result.y)
+    noisy = read_observation(model, result.y, measured=True)
+    print(f"body wind: {model.to_numpy(wind).reshape(-1)}")
+    print(f"alpha/beta: {clean.alpha_deg:.3f}, {clean.beta_deg:.3f} deg")
+    print(f"clean altitude/TAS: {clean.altitude_m:.3f} m, {clean.tas_mps:.3f} m/s")
+    print(f"noisy altitude/TAS: {noisy.altitude_m:.3f} m, {noisy.tas_mps:.3f} m/s")
 
 
 # #endregion 03-simulate-1

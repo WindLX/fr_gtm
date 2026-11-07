@@ -6,8 +6,9 @@ import casadi as ca
 import fly_ruler_core as fr
 import numpy as np
 import pytest
+from ground_helpers import ground_state
 
-from fr_gtm import GTMConfig, GTMSystem, build_ground_initial_state
+from fr_gtm import GTMConfig, GTMSystem
 
 BACKEND_REFERENCE = np.load(
     Path(__file__).parent / "data" / "gtm_backend_trajectory.npz",
@@ -16,11 +17,11 @@ BACKEND_REFERENCE = np.load(
 TRAJECTORY_BACKENDS = ("numpy", "casadi", "native", "jax")
 # 冻结轨迹的油门指令恒为 40%，参考的油门状态也恒为 40%；本模型用同一配平值
 # 初始化所选滞后，因此整条轨迹仍应与参考一致。
-LAG = GTMConfig.default().engine.lag
+LAG = GTMConfig.fullscale().engine.lag
 
 
 def _builder(*, enable_ground: bool = False) -> fr.PyIrBuilder:
-    builder = GTMSystem.build("Root", GTMConfig.default(enable_ground=enable_ground))
+    builder = GTMSystem.build("Root", GTMConfig.fullscale(enable_ground=enable_ground))
     if not isinstance(builder, fr.PyIrBuilder):
         raise TypeError("expected top-level GTM builder")
     return builder
@@ -41,7 +42,7 @@ def _state(model: Any, x: np.ndarray) -> np.ndarray:
                 "Root.eom::quat": x[6:10],
                 "Root.eom::omega_body": x[10:13],
                 "Root.actuator::position": x[13:16],
-                "Root.engine::lag_state": np.asarray(LAG.trim_state(x[16])),
+                "Root.engine.lag::lag_state": np.asarray(LAG.trim_state(x[16])),
                 "Root.wind.dryden::u_gw": x[17:18],
                 "Root.wind.dryden::v_gw": x[18:20],
                 "Root.wind.dryden::w_gw": x[20:22],
@@ -79,7 +80,7 @@ def _inputs(model: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
             {
                 "Root::u": BACKEND_REFERENCE["u"],
                 "Root::d": BACKEND_REFERENCE["d"],
-                "Root::n": BACKEND_REFERENCE["n"],
+                "Root::n": BACKEND_REFERENCE["n"][:17],
             }
         )
     )
@@ -190,14 +191,14 @@ def test_casadi_matches_numpy() -> None:
             "Root.eom::vel_body": [100.0, 0.0, 5.0],
             "Root.eom::quat": [1.0, 0.0, 0.0, 0.0],
             "Root.actuator::position": [-2.0, 1.0, 0.0],
-            "Root.engine::lag_state": np.asarray(LAG.trim_state(40.0)),
+            "Root.engine.lag::lag_state": np.asarray(LAG.trim_state(40.0)),
         }
     )
     u = numpy_model.u.build(
         {
             "Root::u": [-2.0, 1.0, 0.0, 40.0],
             "Root::d": np.zeros(4),
-            "Root::n": np.zeros(21),
+            "Root::n": np.zeros(17),
         }
     )
     p = numpy_model.p.build()
@@ -231,24 +232,24 @@ def test_casadi_matches_numpy() -> None:
 
 @pytest.mark.parametrize("backend", TRAJECTORY_BACKENDS)
 def test_ground_contact_one_step_matches_numpy(backend: str) -> None:
-    cfg = GTMConfig.default(enable_ground=True)
+    cfg = GTMConfig.fullscale(enable_ground=True)
     reference = _compiled_backend("numpy", enable_ground=True)
     candidate = _compiled_backend(backend, enable_ground=True)
-    reference_x = build_ground_initial_state(
+    reference_x = ground_state(
         reference,
         cfg,
         forward_speed_mps=20.0,
     )
-    candidate_x = build_ground_initial_state(
+    candidate_x = ground_state(
         candidate,
         cfg,
         forward_speed_mps=20.0,
     )
     reference_u = reference.u.build(
-        {"Root::u": np.zeros(4), "Root::d": np.zeros(4), "Root::n": np.zeros(21)}
+        {"Root::u": np.zeros(4), "Root::d": np.zeros(4), "Root::n": np.zeros(17)}
     )
     candidate_u = candidate.u.build(
-        {"Root::u": np.zeros(4), "Root::d": np.zeros(4), "Root::n": np.zeros(21)}
+        {"Root::u": np.zeros(4), "Root::d": np.zeros(4), "Root::n": np.zeros(17)}
     )
     reference_result = reference.discrete_fn(
         0.0,
@@ -291,8 +292,12 @@ def test_ground_contact_one_step_matches_numpy(backend: str) -> None:
         rtol=rtol,
         atol=atol,
     )
-    reference_outputs = reference.y.read(_as_numpy(reference_result[2]), by="path")
-    candidate_outputs = candidate.y.read(_as_numpy(candidate_result[2]), by="path")
+    reference_outputs = reference.effects.read(
+        _as_numpy(reference_result[3]), by="path"
+    )
+    candidate_outputs = candidate.effects.read(
+        _as_numpy(candidate_result[3]), by="path"
+    )
     for path in (
         "Root::ground_force_body",
         "Root::ground_moment_body",
@@ -356,7 +361,7 @@ def test_backend_one_step_matches_frozen_gtm_ad_trajectory(
     )
     np.testing.assert_allclose(
         y,
-        BACKEND_REFERENCE["y_samples"][sample_index],
+        BACKEND_REFERENCE["y_samples"][sample_index][:17],
         rtol=ref_y_rtol,
         atol=ref_y_atol,
     )
@@ -374,9 +379,9 @@ def test_zero_rudder_retains_local_control_effectiveness() -> None:
     actuator_row = next(
         row for row in model.x.infos if row.path == "Root.actuator::position"
     )
-    nz_row = next(row for row in model.y.infos if row.path == "Root::nz")
+    nz_row = next(row for row in model.y.infos if row.path == "Root::clean_y")
     derivative = ca.jacobian(
-        y_sym[int(nz_row.start)],
+        y_sym[int(nz_row.start) + 11],
         x_sym[int(actuator_row.start) + 2],
     )
     derivative_fn = ca.Function(
@@ -399,10 +404,8 @@ def test_zero_speed_airdata_jacobian_is_finite() -> None:
     xdot, _, y_sym, _ = model.continuous_fn(
         ca.SX(0.0), x_sym, ca.SX.zeros(model.n_xd), u_sym, model.p.default()
     )
-    selected_outputs = []
-    for path in ("Root::V", "Root::alpha", "Root::beta"):
-        row = next(item for item in model.y.infos if item.path == path)
-        selected_outputs.append(y_sym[int(row.start) : int(row.stop)])
+    clean = model.y.read(y_sym, by="path")["Root::clean_y"]
+    selected_outputs = [clean[3], clean[1], clean[2]]
     derivative = ca.Function(
         "gtm_zero_speed_derivative",
         [x_sym, u_sym],

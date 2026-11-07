@@ -10,7 +10,7 @@ from fr_gtm import GTMConfig, GTMSystem
 
 
 def test_default_remains_linear_and_invalid_method_rejected() -> None:
-    cfg = GTMConfig.default()
+    cfg = GTMConfig.fullscale()
     assert cfg.aero.interpolation_method == "linear"
     with pytest.raises(ValidationError):
         type(cfg.aero).model_validate(
@@ -25,7 +25,7 @@ def test_default_remains_linear_and_invalid_method_rejected() -> None:
 def test_real_elevator_cubic_public_nested_ad_matches_independent_spline() -> None:
     from scipy.interpolate import CubicSpline
 
-    control = GTMConfig.default().aero.tables.control_surfaces
+    control = GTMConfig.fullscale().aero.tables.control_surfaces
     grids = [
         control.alpha_elevator,
         control.beta_elevator,
@@ -75,7 +75,7 @@ def test_real_elevator_cubic_public_nested_ad_matches_independent_spline() -> No
 @pytest.fixture(scope="module")
 def cubic_case() -> tuple[GTMConfig, fr.PyIrBuilder, fr.Compiler, fr.NumpyArray]:
     """三种候选后端共用一次 NumPy 构图、编译和参考轨迹。"""
-    cfg = GTMConfig.default()
+    cfg = GTMConfig.fullscale()
     cfg.aero.interpolation_method = "cubic"
     builder = GTMSystem.build("Root", cfg)
     assert isinstance(builder, fr.PyIrBuilder)
@@ -112,7 +112,7 @@ def simulate[ArrayT](model: fr.CompiledModel[ArrayT], cfg: GTMConfig) -> fr.Nump
             "Root.eom::pos_ned": [0.0, 0.0, -1000.0],
             "Root.eom::vel_body": [100.0, 0.0, 0.0],
             "Root.eom::quat": [1.0, 0.0, 0.0, 0.0],
-            "Root.engine::lag_state": cfg.engine.lag.trim_state(40.0),
+            "Root.engine.lag::lag_state": cfg.engine.lag.trim_state(40.0),
         }
     )
     xd = model.xd.build()

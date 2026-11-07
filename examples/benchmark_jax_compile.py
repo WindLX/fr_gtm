@@ -24,7 +24,7 @@ from time import perf_counter
 
 import fly_ruler_core as fr
 
-from fr_gtm import GTMConfig, GTMSystem, build_initial_state
+from fr_gtm import GTMConfig, GTMSystem, init
 
 
 def main() -> None:
@@ -42,7 +42,8 @@ def main() -> None:
     import jax.numpy as jnp
 
     # cache_policy="rebuild" 强制重新生成，model_build_s 才表示真实的编译耗时。
-    builder = GTMSystem.build("Root", GTMConfig.default())
+    cfg = GTMConfig.fullscale()
+    builder = GTMSystem.build("Root", cfg)
     started = perf_counter()
     model = fr.Compiler(
         fr.CompilerSpec(
@@ -55,10 +56,14 @@ def main() -> None:
     model_build_s = perf_counter() - started
 
     # 四个运行向量统一转成 jnp 数组，作为跟踪与 lower 的位置参数。
-    x = jnp.asarray(build_initial_state(model))
-    xd = jnp.asarray(model.xd.build())
-    u = jnp.asarray(model.u.build())
-    p = jnp.asarray(model.p.build())
+    x0, xd0, u0, p0 = init(
+        model,
+        cfg,
+        position=(0.0, 0.0, 0.0),
+        airdata=(0.0, 0.0, 50.0),
+        command=(0.0, 0.0, 0.0, 0.0),
+    )
+    x, xd, u, p = (jnp.asarray(value) for value in (x0, xd0, u0, p0))
     arguments = (0.0, x, xd, u, p)
 
     # 连续函数分三阶段度量：make_jaxpr 只跟踪，lower 生成 StableHLO，compile 触发 XLA。

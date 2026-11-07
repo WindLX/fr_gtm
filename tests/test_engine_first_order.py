@@ -1,60 +1,56 @@
 """一阶发动机的配置选择、解析响应与公开步进合同。"""
 
-from pathlib import Path
-
 import fly_ruler_core as fr
 import numpy as np
 import pytest
 
-from fr_gtm import EngineLagConfig, FirstOrderEngineLagConfig, GTMConfig
-from fr_gtm.blocks import Engine
+from fr_gtm import FirstOrderThrottleLagConfig, GTMConfig, JetCatThrottleLagConfig
+from fr_gtm.components.engine import Engine
 
 
 @pytest.mark.parametrize("fullscale", [True, False])
-def test_default_and_config_switch(fullscale: bool, tmp_path: Path) -> None:
-    cfg = GTMConfig.default(fullscale)
-    assert isinstance(cfg.engine.lag, FirstOrderEngineLagConfig)
+def test_default_and_config_switch(fullscale: bool) -> None:
+    cfg = (GTMConfig.fullscale if fullscale else GTMConfig.subscale)()
+    assert isinstance(cfg.engine.lag, FirstOrderThrottleLagConfig)
     assert cfg.engine.lag.time_constant_s == 1.5
     assert cfg.engine.lag.trim_state(40.0) == (40.0,)
-    path = tmp_path / "engine.toml"
-    path.write_text('[engine.lag]\nmodel = "second_order"\ntime_scale = 2.0\n')
-    second = GTMConfig.from_toml(path).engine.lag
-    assert isinstance(second, EngineLagConfig)
+    second = JetCatThrottleLagConfig(time_scale=2.0)
     assert second.time_scale == 2.0
-    path.write_text('[engine.lag]\nmodel = "first_order"\ntime_constant_s = 3.0\n')
-    first = GTMConfig.from_toml(path).engine.lag
-    assert isinstance(first, FirstOrderEngineLagConfig)
+    first = FirstOrderThrottleLagConfig(time_constant_s=3.0)
     assert first.time_constant_s == 3.0
     assert isinstance(
         type(cfg.engine).model_validate(cfg.engine.model_dump()).lag,
-        FirstOrderEngineLagConfig,
+        FirstOrderThrottleLagConfig,
     )
-    cfg.engine.lag = second
+    cfg.engine = cfg.engine.model_copy(update={"lag": second})
     assert isinstance(
-        type(cfg.engine).model_validate(cfg.engine.model_dump()).lag, EngineLagConfig
+        type(cfg.engine).model_validate(cfg.engine.model_dump()).lag,
+        JetCatThrottleLagConfig,
     )
 
 
 @pytest.mark.parametrize("tau", [0.0, -1.0, float("inf"), float("nan")])
 def test_invalid_time_constant(tau: float) -> None:
     with pytest.raises(ValueError):
-        FirstOrderEngineLagConfig(time_constant_s=tau)
+        FirstOrderThrottleLagConfig(time_constant_s=tau)
 
 
 def test_invalid_limits() -> None:
     with pytest.raises(ValueError, match="lower"):
-        FirstOrderEngineLagConfig(command_lower=100.0, command_upper=50.0)
+        FirstOrderThrottleLagConfig(command_lower=100.0, command_upper=50.0)
 
 
 @pytest.mark.parametrize("backend", ["numpy", "casadi", "native", "jax", "torch"])
 @pytest.mark.parametrize("tau", [1.5, 3.0])
 def test_first_order_analytic_response(backend: str, tau: float) -> None:
-    cfg = GTMConfig.default()
-    cfg.engine.lag = FirstOrderEngineLagConfig(time_constant_s=tau)
+    cfg = GTMConfig.fullscale()
+    cfg.engine = cfg.engine.model_copy(
+        update={"lag": FirstOrderThrottleLagConfig(time_constant_s=tau)}
+    )
 
     @fr.system
     def EngineOnly() -> None:
-        engine = Engine("engine", cfg)
+        engine = Engine("engine", cfg.engine)
         command = fr.input("command", (1,))
         command >> engine.throttle_command
         fr.math.vector([0.0, 0.0, 0.0]) >> engine.omega_body
@@ -70,7 +66,7 @@ def test_first_order_analytic_response(backend: str, tau: float) -> None:
         xd, p = model.xd.build(), model.p.build()
         for command in (-50.0, 80.0, 150.0, 20.0):
             x = model.x.build(
-                {"Root.engine::lag_state": cfg.engine.lag.trim_state(40.0)}
+                {"Root.engine.lag::lag_state": cfg.engine.lag.trim_state(40.0)}
             )
             u = model.u.build({"Root::command": [command]})
             rates, _, outputs, _ = model.continuous_fn(0.0, x, xd, u, p)
@@ -90,7 +86,7 @@ def test_first_order_analytic_response(backend: str, tau: float) -> None:
             np.testing.assert_allclose(
                 model.to_numpy(x).reshape(-1), [expected], rtol=2e-7, atol=1e-8
             )
-        x = model.x.build({"Root.engine::lag_state": [40.0]})
+        x = model.x.build({"Root.engine.lag::lag_state": [40.0]})
         u = model.u.build({"Root::command": [40.0]})
         np.testing.assert_array_equal(
             model.to_numpy(model.flow_fn(0.0, x, xd, u, p, 1.5)).reshape(-1), [40.0]

@@ -22,7 +22,7 @@ def _model(backend: str, cfg: GTMConfig) -> fr.CompiledModel[Any]:
 
 @pytest.mark.parametrize("backend", ["numpy", "casadi", "jax"])
 def test_high_rate_linear_extension(backend: str) -> None:
-    cfg = GTMConfig.default()
+    cfg = GTMConfig.fullscale()
     cfg.aero.interpolation_method = "cubic"
     cfg.aero.extrapolation_method = "linear"
     m = _model(backend, cfg)
@@ -33,7 +33,7 @@ def test_high_rate_linear_extension(backend: str) -> None:
             "Root.eom::quat": [0.8523097, -0.2087347, 0.4794317, 0.01197339],
             "Root.eom::omega_body": [65.20225, 0.3323816, -11.64703],
             "Root.actuator::position": [-0.4064, 12.217, 9.1685],
-            "Root.engine::lag_state": cfg.engine.lag.trim_state(38.319),
+            "Root.engine.lag::lag_state": cfg.engine.lag.trim_state(38.319),
         }
     )
     u = m.u.build({"Root::u": [-0.4014, 12.2777, 9.173, 38.358]})
@@ -46,7 +46,7 @@ def test_high_rate_linear_extension(backend: str) -> None:
 
 
 def test_extrapolation_is_explicit_and_validated() -> None:
-    cfg = GTMConfig.default()
+    cfg = GTMConfig.fullscale()
     assert cfg.aero.interpolation_method == "linear"
     assert cfg.aero.extrapolation_method == "polynomial"
     with pytest.raises(ValidationError):

@@ -7,25 +7,28 @@
 
     cd models/fr_gtm && just example-inspect
 
-预期结果：打印 artifact、topology、source、layout、cache 与六个尺寸，随后按 x、u、y
+预期结果：打印布局与产物信息，并启动 Graph WebUI；Ctrl+C 退出。
+使用 --no-graph 只打印 artifact、topology、source、layout、cache 与六个尺寸，按 x、u、y
 分别列出完整路径。cache 首次多为 miss，产物已存在时为 hit。
 
 说明：本示例只读编译产物、不推进仿真；默认全尺寸 NORMAL 构型下 n_x=25、n_xdot=24、
-n_xd=0、n_u=29、n_p=33、n_y=144，其中 xdot 比 x 少一维是因为四元数按 SO3 切空间求导。
+n_xd=0、n_u=25、n_p=33、n_y=34，其中 xdot 比 x 少一维是因为四元数按 SO3 切空间求导。
 """
 
+import argparse
 from pathlib import Path
 
 import fly_ruler_core as fr
+from fly_ruler_std.runtime import graph as fr_graph
 
 from fr_gtm import GTMConfig, GTMSystem
 
 
-def main() -> None:
-    """编译 CasADi 目标并打印产物路径、向量尺寸与路径清单。"""
+def main(*, graph: bool = True, port: int = 18001) -> None:
+    """打印编译布局；默认阻塞打开 Graph WebUI，Ctrl+C 关闭服务。"""
     # builder 只描述系统连接关系，编译阶段才把它降为后端代码与布局。
     root = Path(__file__).resolve().parent.parent
-    builder = GTMSystem.build("Root", GTMConfig.default())
+    builder = GTMSystem.build("Root", GTMConfig.fullscale())
     # artifact_dir 指定产物落盘位置；compile 返回的模型携带产物元数据。
     model = fr.Compiler(
         fr.CompilerSpec(
@@ -52,6 +55,15 @@ def main() -> None:
         for path in paths:
             print(f"  {path}")
 
+    if graph:
+        fr_graph.serve(model, port=port, open_browser=True)
+
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--no-graph", action="store_true", help="只打印布局，不启动 WebUI"
+    )
+    parser.add_argument("--port", type=int, default=18001)
+    args = parser.parse_args()
+    main(graph=not args.no_graph, port=args.port)

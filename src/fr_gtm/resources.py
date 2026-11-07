@@ -2,19 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import ConfigDict
-from pydantic.dataclasses import dataclass
-
-_DATACLASS_CONFIG = ConfigDict(arbitrary_types_allowed=True)
-
-FloatArray = NDArray[np.float64]
 
 
-@dataclass(config=_DATACLASS_CONFIG, frozen=True)
+@dataclass(frozen=True)
 class ReynoldsTables:
     """雷诺数换算网格和结果表。
 
@@ -24,12 +19,12 @@ class ReynoldsTables:
         values: 高度/马赫数网格上的雷诺数，轴顺序为高度、马赫数。
     """
 
-    altitude_ft: FloatArray
-    mach: FloatArray
-    values: FloatArray
+    altitude_ft: NDArray[np.float64]
+    mach: NDArray[np.float64]
+    values: NDArray[np.float64]
 
 
-@dataclass(config=_DATACLASS_CONFIG, frozen=True)
+@dataclass(frozen=True)
 class BasicAirframeTables:
     """基线机体 C2/C4 系数表及其插值轴。
 
@@ -43,16 +38,16 @@ class BasicAirframeTables:
         cy_cl_cm_cn: `[CY, Cl, Cm, Cn]` 系数表，轴顺序为迎角、侧滑角、系数。
     """
 
-    alpha_c2: FloatArray
-    beta_c2: FloatArray
-    reynolds_c2: FloatArray
-    cx_cz: FloatArray
-    alpha_c4: FloatArray
-    beta_c4: FloatArray
-    cy_cl_cm_cn: FloatArray
+    alpha_c2: NDArray[np.float64]
+    beta_c2: NDArray[np.float64]
+    reynolds_c2: NDArray[np.float64]
+    cx_cz: NDArray[np.float64]
+    alpha_c4: NDArray[np.float64]
+    beta_c4: NDArray[np.float64]
+    cy_cl_cm_cn: NDArray[np.float64]
 
 
-@dataclass(config=_DATACLASS_CONFIG, frozen=True)
+@dataclass(frozen=True)
 class ControlSurfaceTables:
     """升降舵、副翼和方向舵增量表及其插值轴。
 
@@ -72,22 +67,22 @@ class ControlSurfaceTables:
         rudder_data: 方向舵六系数增量表。
     """
 
-    alpha_elevator: FloatArray
-    beta_elevator: FloatArray
-    stabilizer: FloatArray
-    elevator: FloatArray
-    elevator_data: FloatArray
-    alpha_aileron: FloatArray
-    beta_aileron: FloatArray
-    aileron: FloatArray
-    aileron_data: FloatArray
-    alpha_rudder: FloatArray
-    beta_rudder: FloatArray
-    rudder: FloatArray
-    rudder_data: FloatArray
+    alpha_elevator: NDArray[np.float64]
+    beta_elevator: NDArray[np.float64]
+    stabilizer: NDArray[np.float64]
+    elevator: NDArray[np.float64]
+    elevator_data: NDArray[np.float64]
+    alpha_aileron: NDArray[np.float64]
+    beta_aileron: NDArray[np.float64]
+    aileron: NDArray[np.float64]
+    aileron_data: NDArray[np.float64]
+    alpha_rudder: NDArray[np.float64]
+    beta_rudder: NDArray[np.float64]
+    rudder: NDArray[np.float64]
+    rudder_data: NDArray[np.float64]
 
 
-@dataclass(config=_DATACLASS_CONFIG, frozen=True)
+@dataclass(frozen=True)
 class DynamicDerivativeTables:
     """Kalviste p/q/r 和 w 轴动态导数表及其插值轴。
 
@@ -107,22 +102,22 @@ class DynamicDerivativeTables:
         w: 六系数耦合导数表。
     """
 
-    alpha_p: FloatArray
-    phat: FloatArray
-    p: FloatArray
-    alpha_q: FloatArray
-    qhat: FloatArray
-    q: FloatArray
-    alpha_r: FloatArray
-    rhat: FloatArray
-    r: FloatArray
-    alpha_w: FloatArray
-    what: FloatArray
-    beta_w: FloatArray
-    w: FloatArray
+    alpha_p: NDArray[np.float64]
+    phat: NDArray[np.float64]
+    p: NDArray[np.float64]
+    alpha_q: NDArray[np.float64]
+    qhat: NDArray[np.float64]
+    q: NDArray[np.float64]
+    alpha_r: NDArray[np.float64]
+    rhat: NDArray[np.float64]
+    r: NDArray[np.float64]
+    alpha_w: NDArray[np.float64]
+    what: NDArray[np.float64]
+    beta_w: NDArray[np.float64]
+    w: NDArray[np.float64]
 
 
-@dataclass(config=_DATACLASS_CONFIG, frozen=True)
+@dataclass(frozen=True)
 class AeroTableResources:
     """模型私有冻结气动资源。
 
@@ -154,144 +149,163 @@ def load_aero_tables(path: str | Path) -> AeroTableResources:
         KeyError: NPZ 缺少必需数组时抛出。
     """
     data_path = Path(path)
+
+    def _axis(archive: np.lib.npyio.NpzFile, name: str) -> NDArray[np.float64]:
+        value = np.asarray(archive[name], dtype=np.float64)
+        if value.ndim != 1 or value.size < 2:
+            raise ValueError(
+                f"aerodynamic table axis {name} must be a 1D array with 2+ values"
+            )
+        if not np.isfinite(value).all():
+            raise ValueError(
+                f"aerodynamic table axis {name} must contain only finite values"
+            )
+        if not np.all(np.diff(value) > 0.0):
+            raise ValueError(
+                f"aerodynamic table axis {name} must be strictly increasing"
+            )
+        return value
+
+    def _values(
+        archive: np.lib.npyio.NpzFile,
+        name: str,
+        shape: tuple[int, ...],
+    ) -> NDArray[np.float64]:
+        value = np.asarray(archive[name], dtype=np.float64)
+        if value.shape != shape:
+            raise ValueError(
+                f"aerodynamic table {name} has shape {value.shape}; "
+                f"expected shape {shape}"
+            )
+        if not np.isfinite(value).all():
+            raise ValueError(
+                f"aerodynamic table {name} must contain only finite values"
+            )
+        return value
+
     with np.load(data_path, allow_pickle=False) as archive:
         reynolds_altitude = _axis(archive, "reynolds__altitude_ft")
         reynolds_mach = _axis(archive, "reynolds__mach")
+        reynolds_values = _values(
+            archive,
+            "reynolds__reynolds",
+            (len(reynolds_altitude), len(reynolds_mach)),
+        )
+
+        reynolds = ReynoldsTables(
+            altitude_ft=reynolds_altitude,
+            mach=reynolds_mach,
+            values=reynolds_values,
+        )
+
         c2_alpha = _axis(archive, "C2_bas_Re_dep__alpha")
         c2_beta = _axis(archive, "C2_bas_Re_dep__beta")
         c2_reynolds = _axis(archive, "C2_bas_Re_dep__reynolds")
+
         c4_alpha = _axis(archive, "C4_bas_Re_indep__alpha")
         c4_beta = _axis(archive, "C4_bas_Re_indep__beta")
+
+        basic_airframe = BasicAirframeTables(
+            alpha_c2=c2_alpha,
+            beta_c2=c2_beta,
+            reynolds_c2=c2_reynolds,
+            cx_cz=_values(
+                archive,
+                "C2_bas_Re_dep__data",
+                (len(c2_alpha), len(c2_beta), len(c2_reynolds), 2),
+            ),
+            alpha_c4=c4_alpha,
+            beta_c4=c4_beta,
+            cy_cl_cm_cn=_values(
+                archive,
+                "C4_bas_Re_indep__data",
+                (len(c4_alpha), len(c4_beta), 4),
+            ),
+        )
+
         elevator_alpha = _axis(archive, "dC3_ele__alpha")
         elevator_beta = _axis(archive, "dC3_ele__beta")
         stabilizer = _axis(archive, "dC3_ele__stab")
         elevator = _axis(archive, "dC3_ele__elev")
+
         aileron_alpha = _axis(archive, "dC6_ail__alpha")
         aileron_beta = _axis(archive, "dC6_ail__beta")
         aileron = _axis(archive, "dC6_ail__ail")
+
         rudder_alpha = _axis(archive, "dC6_rud__alpha")
         rudder_beta = _axis(archive, "dC6_rud__beta")
         rudder = _axis(archive, "dC6_rud__rud")
+
+        control_surfaces = ControlSurfaceTables(
+            alpha_elevator=elevator_alpha,
+            beta_elevator=elevator_beta,
+            stabilizer=stabilizer,
+            elevator=elevator,
+            elevator_data=_values(
+                archive,
+                "dC3_ele__data",
+                (
+                    len(elevator_alpha),
+                    len(elevator_beta),
+                    len(stabilizer),
+                    len(elevator),
+                    3,
+                ),
+            ),
+            alpha_aileron=aileron_alpha,
+            beta_aileron=aileron_beta,
+            aileron=aileron,
+            aileron_data=_values(
+                archive,
+                "dC6_ail__data",
+                (len(aileron_alpha), len(aileron_beta), len(aileron), 6),
+            ),
+            alpha_rudder=rudder_alpha,
+            beta_rudder=rudder_beta,
+            rudder=rudder,
+            rudder_data=_values(
+                archive,
+                "dC6_rud__data",
+                (len(rudder_alpha), len(rudder_beta), len(rudder), 6),
+            ),
+        )
+
         p_alpha = _axis(archive, "dC3_p__alpha")
         phat = _axis(archive, "dC3_p__phat")
+
         q_alpha = _axis(archive, "dC3_q__alpha")
         qhat = _axis(archive, "dC3_q__qhat")
+
         r_alpha = _axis(archive, "dC3_r__alpha")
         rhat = _axis(archive, "dC3_r__rhat")
+
         w_alpha = _axis(archive, "dC6_w__alpha")
         what = _axis(archive, "dC6_w__what")
         w_beta = _axis(archive, "dC6_w__beta")
 
+        dynamic_derivatives = DynamicDerivativeTables(
+            alpha_p=p_alpha,
+            phat=phat,
+            p=_values(archive, "dC3_p__data", (len(p_alpha), len(phat), 3)),
+            alpha_q=q_alpha,
+            qhat=qhat,
+            q=_values(archive, "dC3_q__data", (len(q_alpha), len(qhat), 3)),
+            alpha_r=r_alpha,
+            rhat=rhat,
+            r=_values(archive, "dC3_r__data", (len(r_alpha), len(rhat), 3)),
+            alpha_w=w_alpha,
+            what=what,
+            beta_w=w_beta,
+            w=_values(
+                archive,
+                "dC6_w__data",
+                (len(w_alpha), len(what), len(w_beta), 6),
+            ),
+        )
+
         return AeroTableResources(
-            reynolds=ReynoldsTables(
-                altitude_ft=reynolds_altitude,
-                mach=reynolds_mach,
-                values=_values(
-                    archive,
-                    "reynolds__reynolds",
-                    (len(reynolds_altitude), len(reynolds_mach)),
-                ),
-            ),
-            basic_airframe=BasicAirframeTables(
-                alpha_c2=c2_alpha,
-                beta_c2=c2_beta,
-                reynolds_c2=c2_reynolds,
-                cx_cz=_values(
-                    archive,
-                    "C2_bas_Re_dep__data",
-                    (len(c2_alpha), len(c2_beta), len(c2_reynolds), 2),
-                ),
-                alpha_c4=c4_alpha,
-                beta_c4=c4_beta,
-                cy_cl_cm_cn=_values(
-                    archive,
-                    "C4_bas_Re_indep__data",
-                    (len(c4_alpha), len(c4_beta), 4),
-                ),
-            ),
-            control_surfaces=ControlSurfaceTables(
-                alpha_elevator=elevator_alpha,
-                beta_elevator=elevator_beta,
-                stabilizer=stabilizer,
-                elevator=elevator,
-                elevator_data=_values(
-                    archive,
-                    "dC3_ele__data",
-                    (
-                        len(elevator_alpha),
-                        len(elevator_beta),
-                        len(stabilizer),
-                        len(elevator),
-                        3,
-                    ),
-                ),
-                alpha_aileron=aileron_alpha,
-                beta_aileron=aileron_beta,
-                aileron=aileron,
-                aileron_data=_values(
-                    archive,
-                    "dC6_ail__data",
-                    (len(aileron_alpha), len(aileron_beta), len(aileron), 6),
-                ),
-                alpha_rudder=rudder_alpha,
-                beta_rudder=rudder_beta,
-                rudder=rudder,
-                rudder_data=_values(
-                    archive,
-                    "dC6_rud__data",
-                    (len(rudder_alpha), len(rudder_beta), len(rudder), 6),
-                ),
-            ),
-            dynamic_derivatives=DynamicDerivativeTables(
-                alpha_p=p_alpha,
-                phat=phat,
-                p=_values(archive, "dC3_p__data", (len(p_alpha), len(phat), 3)),
-                alpha_q=q_alpha,
-                qhat=qhat,
-                q=_values(archive, "dC3_q__data", (len(q_alpha), len(qhat), 3)),
-                alpha_r=r_alpha,
-                rhat=rhat,
-                r=_values(archive, "dC3_r__data", (len(r_alpha), len(rhat), 3)),
-                alpha_w=w_alpha,
-                what=what,
-                beta_w=w_beta,
-                w=_values(
-                    archive,
-                    "dC6_w__data",
-                    (len(w_alpha), len(what), len(w_beta), 6),
-                ),
-            ),
+            reynolds=reynolds,
+            basic_airframe=basic_airframe,
+            control_surfaces=control_surfaces,
+            dynamic_derivatives=dynamic_derivatives,
         )
-
-
-def _axis(archive: np.lib.npyio.NpzFile, name: str) -> FloatArray:
-    value = np.asarray(archive[name], dtype=np.float64)
-    if value.ndim != 1 or value.size < 2:
-        raise ValueError(
-            f"aerodynamic table axis {name} must be a 1D array with 2+ values"
-        )
-    if not np.isfinite(value).all():
-        raise ValueError(
-            f"aerodynamic table axis {name} must contain only finite values"
-        )
-    if not np.all(np.diff(value) > 0.0):
-        raise ValueError(f"aerodynamic table axis {name} must be strictly increasing")
-    return value
-
-
-def _values(
-    archive: np.lib.npyio.NpzFile,
-    name: str,
-    shape: tuple[int, ...],
-) -> FloatArray:
-    value = np.asarray(archive[name], dtype=np.float64)
-    if value.shape != shape:
-        raise ValueError(
-            f"aerodynamic table {name} has shape {value.shape}; expected shape {shape}"
-        )
-    if not np.isfinite(value).all():
-        raise ValueError(f"aerodynamic table {name} must contain only finite values")
-    return value
-
-
-__all__ = ["AeroTableResources", "load_aero_tables"]

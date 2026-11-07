@@ -7,27 +7,27 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from fr_gtm import EngineLagConfig, FirstOrderEngineLagConfig, GTMConfig
-from fr_gtm.blocks import Engine, EngineLoads
+from fr_gtm import FirstOrderThrottleLagConfig, GTMConfig, JetCatThrottleLagConfig
+from fr_gtm.components.engine import Engine, EngineLoads
 
 
 @pytest.mark.parametrize("fullscale", [False, True], ids=["scale", "fullscale"])
 @pytest.mark.parametrize(
     "lag",
-    [FirstOrderEngineLagConfig(), EngineLagConfig()],
+    [FirstOrderThrottleLagConfig(), JetCatThrottleLagConfig()],
     ids=["first_order", "second_order"],
 )
 def test_engine_loads_matches_engine_at_effective_throttle(
-    fullscale: bool, lag: FirstOrderEngineLagConfig | EngineLagConfig
+    fullscale: bool, lag: FirstOrderThrottleLagConfig | JetCatThrottleLagConfig
 ) -> None:
     """指定有效油门与环境，比较公开输出；负值与超过100%均保留。"""
-    cfg = GTMConfig.default(fullscale)
-    cfg.engine.lag = lag
+    cfg = (GTMConfig.fullscale if fullscale else GTMConfig.subscale)()
+    cfg.engine = cfg.engine.model_copy(update={"lag": lag})
 
     @fr.system
     def EngineAndLoads() -> None:
-        engine = Engine("engine", cfg)
-        loads = EngineLoads("loads", cfg)
+        engine = Engine("engine", cfg.engine)
+        loads = EngineLoads("loads", cfg.engine.loads)
         command = fr.input("command", (1,))
         effective_throttle = fr.input("effective_throttle", (1,))
         omega = fr.input("omega_body", (3,))
@@ -53,7 +53,7 @@ def test_engine_loads_matches_engine_at_effective_throttle(
         EngineAndLoads.build("EngineAndLoads"), target=fr.targets.casadi
     )
     # EngineLoads没有增加连续或数字存储；原发动机保留配置对应的滞后阶数。
-    assert model.n_x == (1 if isinstance(lag, FirstOrderEngineLagConfig) else 2)
+    assert model.n_x == (1 if isinstance(lag, FirstOrderThrottleLagConfig) else 2)
     assert model.n_xd == 0
     xd, params = model.xd.build(), model.p.build()
     # 非零p/q/r覆盖转子陀螺项，非零动压与低压力覆盖冲压阻力和推力缩放。
@@ -65,9 +65,9 @@ def test_engine_loads_matches_engine_at_effective_throttle(
     for throttle in (-1.474, 0.0, 40.0, 100.0, 115.0):
         # 二阶额外取非配平内部状态但保持C*x=throttle；载荷不能依赖隐藏坐标。
         state = np.asarray(lag.trim_state(throttle), dtype=np.float64)
-        if isinstance(lag, EngineLagConfig):
+        if isinstance(lag, JetCatThrottleLagConfig):
             state += 10.0 * np.array([lag.output_matrix[1], -lag.output_matrix[0]])
-        x = model.x.build({"Root.engine::lag_state": state})
+        x = model.x.build({"Root.engine.lag::lag_state": state})
         for omega, pressure, qbar in environments:
             baseline_force: NDArray[np.float64] | None = None
             baseline_moment: NDArray[np.float64] | None = None
@@ -114,20 +114,20 @@ def test_engine_loads_matches_engine_at_effective_throttle(
 @pytest.mark.parametrize("fullscale", [False, True], ids=["scale", "fullscale"])
 @pytest.mark.parametrize(
     "lag",
-    [FirstOrderEngineLagConfig(), EngineLagConfig()],
+    [FirstOrderThrottleLagConfig(), JetCatThrottleLagConfig()],
     ids=["first_order", "second_order"],
 )
 def test_engine_loads_compiles_in_command_feedback_without_feedthrough(
-    fullscale: bool, lag: FirstOrderEngineLagConfig | EngineLagConfig
+    fullscale: bool, lag: FirstOrderThrottleLagConfig | JetCatThrottleLagConfig
 ) -> None:
     """真实状态输出接载荷反馈；命令改变滞后导数而不直接改变当前载荷。"""
-    cfg = GTMConfig.default(fullscale)
-    cfg.engine.lag = lag
+    cfg = (GTMConfig.fullscale if fullscale else GTMConfig.subscale)()
+    cfg.engine = cfg.engine.model_copy(update={"lag": lag})
 
     @fr.system
     def EngineLoadFeedback() -> None:
-        engine = Engine("engine", cfg)
-        loads = EngineLoads("loads", cfg)
+        engine = Engine("engine", cfg.engine)
+        loads = EngineLoads("loads", cfg.engine.loads)
         request = fr.input("request", (1,))
         omega = fr.input("omega_body", (3,))
         pressure = fr.input("pressure_ratio", (1,))
@@ -154,9 +154,9 @@ def test_engine_loads_compiles_in_command_feedback_without_feedthrough(
     model = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=0.005)).compile(
         EngineLoadFeedback.build("EngineLoadFeedback"), target=fr.targets.casadi
     )
-    assert model.n_x == (1 if isinstance(lag, FirstOrderEngineLagConfig) else 2)
+    assert model.n_x == (1 if isinstance(lag, FirstOrderThrottleLagConfig) else 2)
     assert model.n_xd == 0
-    x = model.x.build({"Root.engine::lag_state": lag.trim_state(40.0)})
+    x = model.x.build({"Root.engine.lag::lag_state": lag.trim_state(40.0)})
     xd, params = model.xd.build(), model.p.build()
     rates: list[NDArray[np.float64]] = []
     commands: list[float] = []
@@ -200,7 +200,7 @@ def test_engine_loads_compiles_in_command_feedback_without_feedthrough(
     delta = commands[1] - commands[0]
     expected_rate_delta = (
         np.array([delta / lag.time_constant_s])
-        if isinstance(lag, FirstOrderEngineLagConfig)
+        if isinstance(lag, FirstOrderThrottleLagConfig)
         else np.asarray(lag.input_matrix) * delta / lag.time_scale
     )
     np.testing.assert_allclose(

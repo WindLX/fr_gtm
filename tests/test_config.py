@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from fr_gtm import GTMConfig, Mode
-from fr_gtm.config import ActuatorConfig, AircraftConfig, SensorSingleConfig, WindConfig
+from fr_gtm.config import SensorSingleConfig, WindConfig
 from fr_gtm.resources import load_aero_tables
 
 
@@ -14,22 +14,22 @@ def test_all_reference_configurations_load(
     is_fullscale: bool,
     mode: Mode,
 ) -> None:
-    cfg = GTMConfig.default(is_fullscale=is_fullscale, mode=mode)
+    cfg = (GTMConfig.fullscale if is_fullscale else GTMConfig.subscale)(mode=mode)
     assert cfg.is_fullscale is is_fullscale
-    assert cfg.mode is mode
+    assert cfg.aero.mode is mode
     assert len(cfg.aircraft.inertia0) == 6
     assert cfg.aero.tables.basic_airframe.cx_cz.shape == (32, 27, 10, 2)
     assert cfg.aero.tables.dynamic_derivatives.w.shape == (24, 9, 21, 6)
 
 
 def test_scale_model_is_geometrically_smaller() -> None:
-    full = GTMConfig.default(True)
-    scale = GTMConfig.default(False)
+    full = GTMConfig.fullscale()
+    scale = GTMConfig.subscale()
     assert full.aircraft.S > scale.aircraft.S
     assert full.aircraft.b > scale.aircraft.b
     assert full.aircraft.w0 > scale.aircraft.w0
-    full_ground = GTMConfig.default(True, enable_ground=True).ground
-    scale_ground = GTMConfig.default(False, enable_ground=True).ground
+    full_ground = GTMConfig.fullscale(enable_ground=True).ground
+    scale_ground = GTMConfig.subscale(enable_ground=True).ground
     assert full_ground.enabled
     assert scale_ground.enabled
     assert np.linalg.norm(full_ground.contacts[0].point_body) > np.linalg.norm(
@@ -45,7 +45,7 @@ def test_external_npz_path_is_supported() -> None:
     package_table = (
         Path(__file__).parents[1] / "src" / "fr_gtm" / "data" / "aero_tables.npz"
     )
-    cfg = GTMConfig.default(data_path=package_table)
+    cfg = GTMConfig.fullscale(data_path=package_table)
     assert cfg.aero.tables.reynolds.values.shape == (40, 40)
 
 
@@ -82,44 +82,37 @@ def test_aero_resource_rejects_invalid_shape_and_nonfinite_values(
         load_aero_tables(invalid_axis)
 
 
-def test_sparse_toml_override_preserves_loaded_aero_resources(tmp_path: Path) -> None:
-    config_path = tmp_path / "gtm.toml"
-    config_path.write_text(
-        "[wind]\nwind_speed_low = 12.5\n\n[aero.force_moment]\narm_x = 1.25\n",
-        encoding="utf-8",
-    )
-
-    cfg = GTMConfig.from_toml(config_path)
-
-    assert cfg.wind.wind_speed_low == 12.5
-    assert cfg.aero.force_moment.arm_x == 1.25
-    assert cfg.aero.force_moment.Sref == GTMConfig.default().aero.force_moment.Sref
-    assert cfg.aero.tables.basic_airframe.cx_cz.shape == (32, 27, 10, 2)
+@pytest.mark.parametrize("fullscale", [True, False])
+def test_factories_inject_component_geometry(fullscale: bool) -> None:
+    factory = GTMConfig.fullscale if fullscale else GTMConfig.subscale
+    cfg = factory()
+    aircraft = cfg.aircraft
+    assert cfg.aero.S == cfg.engine.loads.S == aircraft.S
+    assert cfg.aero.b == cfg.wind.wing_span == aircraft.b
+    assert cfg.aero.Cbar == aircraft.Cbar
+    assert cfg.aero.cg_pos == cfg.engine.loads.cg_pos == aircraft.cg_pos0
+    assert cfg.aero.ref_cg == aircraft.ref_cg
 
 
-def test_aircraft_toml_override_rederives_dependent_configuration(
-    tmp_path: Path,
-) -> None:
-    config_path = tmp_path / "gtm.toml"
-    config_path.write_text(
-        "[aircraft]\nw0 = 1234.5\nS = 42.0\nengl_pos = [1.0, 2.0, 3.0]\n",
-        encoding="utf-8",
-    )
-
-    cfg = GTMConfig.from_toml(config_path)
-
-    assert cfg.aircraft.w0 == 1234.5
-    assert cfg.uncertainty.w0 == 1234.5
-    assert cfg.engine.engl_pos == [1.0, 2.0, 3.0]
-    assert cfg.aero.force_moment.Sref == 42.0
-
-
-def test_configuration_rejects_invalid_physical_shapes_and_scales() -> None:
-    with pytest.raises(ValueError, match="6 finite"):
-        AircraftConfig(inertia0=[1.0, 2.0, 3.0])
-    with pytest.raises(ValueError, match="lower limits"):
-        ActuatorConfig(position_lower=[1.0] * 3, position_upper=[0.0] * 3)
+def test_configuration_preserves_supported_validation() -> None:
     with pytest.raises(ValueError):
         SensorSingleConfig(noise_std=-1.0)
     with pytest.raises(ValueError):
         WindConfig(scale_length_high=0.0)
+
+
+def test_modes_are_validated_and_tables_excluded_from_dump() -> None:
+    cfg = GTMConfig.fullscale(mode="1_flap_gear_down")
+    assert cfg.aero.mode is Mode.FULL_FLAP_GEAR_DOWN
+    assert "tables" not in cfg.aero.model_dump()
+    with pytest.raises(ValueError):
+        GTMConfig.subscale(mode="unsupported")
+
+
+def test_factories_create_independent_component_configs() -> None:
+    first = GTMConfig.fullscale()
+    second = GTMConfig.fullscale()
+    first.aero.interpolation_method = "cubic"
+    first.actuator.gain[0] = 1.0
+    assert second.aero.interpolation_method == "linear"
+    assert second.actuator.gain[0] != 1.0

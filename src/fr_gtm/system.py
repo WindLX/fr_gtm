@@ -7,51 +7,50 @@ GTM 特有的表格与符号约定留在各自的 Block 内，标准库负责作
 from __future__ import annotations
 
 import fly_ruler_core as fr
-import numpy as np
 from fly_ruler_std.blocks.actuator import SimpleActuator, SimpleActuatorConfig
 from fly_ruler_std.blocks.physics import (
     GroundContact,
     RigidBody6DOFConfig,
     RigidBody6DOFQuaternion,
-    solve_static_ground_pose,
 )
-from fly_ruler_std.libs.rotation import Quaternion
 
-from .blocks import Aero, Engine, Mass, Sensor, Wind
+from .components.aero import Aero
+from .components.engine import Engine
+from .components.mass import Mass
+from .components.sensor import Sensor
+from .components.wind import Wind
 from .config import GTMConfig
 
-_DEFAULT_CONFIG = GTMConfig.default()
+_DEFAULT_CONFIG = GTMConfig.fullscale()
 
 
 @fr.system(config=GTMConfig)
 def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
-    """组装默认 25 状态 GTM 被控对象与固定 21 通道观测。
+    """组装默认 25 状态 GTM 被控对象与固定 17 通道物理观测。
 
     Args:
         cfg: GTM 配置，给出几何、发动机、作动器、传感器、气动表与地面接触
-            参数；`is_fullscale` 与 `mode` 在编译期决定派生数据。
+            参数；`is_fullscale` 与 `aero.mode` 在编译期决定派生数据。
 
     Note:
         根输入 `u(4,)` 为 `[elevator_deg, aileron_deg, rudder_deg,
-        throttle_percent]`，`d(4,)` 驱动四个 Dryden 滤波器，`n(21,)` 提供
+        throttle_percent]`，`d(4,)` 驱动四个 Dryden 滤波器，`n(17,)` 提供
         标准化传感器噪声。所有随机量都由外部输入，因此零输入下系统是
-        确定性的。`feedback_y` 只含 17 个物理量，刻意不含四个指令
-        遥测通道，便于在内层接入控制器。
+        确定性的。根输出仅为 y/clean_y，各含 17 个物理反馈通道，不追加命令。
+        闭环控制可直接读取 plant.y；命令从输入 u 读取，独立诊断放在 effects。
 
         前三个指令通道进入三通道一阶作动器，第四通道直接进入 `Engine` 的
         可配置油门滞后；油门不再经过作动器，因此 `Root::u[3]` 是命令油门，
-        `Root::effective_throttle` 是滞后后的有效油门。
+        y/clean_y 的第 16 通道是滞后后的有效油门。
     """
     u = fr.input(
         "u",
         (4,),
-        description=(
-            "Commands [elevator_deg, aileron_deg, rudder_deg, throttle_percent]"
-        ),
+        description=("指令：[升降舵deg, 副翼deg, 方向舵deg, 油门%]"),
     )
-    d = fr.input("d", (4,), description="Dryden white-noise inputs [nu, nv, nw, np]")
+    d = fr.input("d", (4,), description="Dryden 四路标准化白噪声 [nu, nv, nw, np]")
     n = fr.input(
-        "n", (21,), description="Standardized noise for the 21-channel sensor layout"
+        "n", (17,), description="17 个物理传感器通道的标准化噪声，不含指令遥测噪声"
     )
 
     actuator = SimpleActuator(
@@ -65,10 +64,10 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
             expose_params=False,
         ),
     )
-    wind = Wind("wind", cfg)
-    mass = Mass("mass", cfg)
-    aero = Aero("aero", cfg)
-    engine = Engine("engine", cfg)
+    wind = Wind("wind", cfg.wind)
+    mass = Mass("mass", cfg.aircraft)
+    aero = Aero("aero", cfg.aero)
+    engine = Engine("engine", cfg.engine)
     eom = RigidBody6DOFQuaternion(
         "eom",
         RigidBody6DOFConfig(
@@ -78,52 +77,52 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
     )
     sensor = Sensor("sensor", cfg.sensor)
 
-    # Command dynamics and environmental disturbances remain independent root
-    # inputs, which permits deterministic tests and externally sampled noise.
+    # 舵面、油门、风激励与传感器噪声是独立输入；模型内部不生成随机数。
+    # 仅前三个舵面指令经过作动器的增益、速率与位置限幅，单位保持 deg。
     u[:3] >> actuator.command
-    fr.math.vector([u[3]]) >> engine.throttle_command
-    d >> wind.noise
 
-    # Altitude is positive above the NED origin. Dryden intentionally receives
-    # body-speed magnitude inside the wind subsystem to avoid aero feedback.
-    altitude_from_state = fr.math.vector([-eom.pos_ned_out[2]])
-    altitude_from_state >> wind.altitude
-    eom.vel_body_out >> wind.velocity
-    eom.DCM >> wind.DCM
-
-    # Aero consumes the three surface positions, which are also exported on their
-    # own so that control-effectiveness queries against the exported signal stay
-    # inside the aero moment dependency closure.
-    surface_position = actuator.position_out
-    # `Root::actuator_position` keeps the frozen gtm_ad four-channel observation
-    # layout: the three surface positions followed by the effective throttle.
-    actuator_position = fr.math.concatenate(
-        [surface_position, engine.effective_throttle]
-    )
-
-    # Aero consumes wind-relative translational/angular motion internally and
-    # preserves the gtm_ad coefficient-table ordering and Kalviste rate split.
-    surface_position >> aero.surfaces
-    eom.pos_ned_out >> aero.position
-    eom.vel_body_out >> aero.velocity
-    eom.quat_out >> aero.quat
-    eom.omega_body_out >> aero.omega_body
-    wind.uvw >> aero.wind_uvw
-    wind.omega >> aero.wind_omega
-
-    # The twin-engine block owns thrust, ram drag, offset moments and rotor
-    # gyroscopic effects; it shares air-data produced by the aero block. The
-    # fourth command channel bypasses the actuator and drives the lag directly.
+    # 油门指令（%）直接进入发动机自有滞后；载荷使用滞后后的状态，不由命令直通。
+    # 发动机读取刚体角速率计算转子陀螺力矩，读取气动块的大气压力比和动压计算载荷。
+    u[3] >> engine.throttle_command
     eom.omega_body_out >> engine.omega_body
     aero.pressure_ratio >> engine.pressure_ratio
     aero.qbar >> engine.qbar
 
-    # Runtime mass/inertia uncertainty feeds every load-to-acceleration path.
-    # Gravity is positive Down in NED and rotated to FRD for the rigid body.
+    # 气动只接三个舵面实际位置；油门不参与气动查表。
+    surface_position = actuator.position_out
+    # 物理观测的最后四项为 [升降舵deg, 副翼deg, 方向舵deg, 有效油门%]，
+    # 与末尾追加的四个“指令”通道不同；两者不应互换。
+    actuator_position = fr.math.concatenate(
+        [surface_position, engine.effective_throttle]
+    )
+
+    # NED 的位置第三分量向下为正，大气/风/传感器共享其负值作为正向上高度。
+    altitude = -eom.pos_ned_out[2]
+
+    # 风模块用刚体速度模值驱动 Dryden 时间常数，不用已扣风的真空速，避免气动反馈环。
+    # DCM 为 FRD→NED；风模块内部负责把稳态风和突风转换到 FRD 后输出。
+    altitude >> wind.altitude
+    eom.vel_body_out >> wind.velocity_body
+    eom.DCM >> wind.DCM
+    d >> wind.noise
+
+    # 气动块内部再扣除风的平动/角运动，并执行度制查表与 Kalviste 角速率分解。
+    # 这里连接的是实际声明的 velocity 端口，而不是 Python 局部变量 velocity_body。
+    altitude >> aero.altitude
+    surface_position >> aero.surfaces
+    eom.vel_body_out >> aero.velocity
+    eom.omega_body_out >> aero.omega_body
+    wind.uvw >> aero.wind_uvw
+    wind.omega >> aero.wind_omega
+
+    # 质量块统一提供运行时扰动后的质量、惯量及其逆矩阵，刚体开启外部质量模式。
+    # 重力在 NED 中为 [0,0,W]；DCM.T 将其旋转到 FRD。各载荷块不再重复加重力。
     mass.mass >> eom.mass
     mass.inertia >> eom.inertia
     mass.inertia_inv >> eom.inertia_inv
+
     gravity_body = eom.DCM.T @ fr.math.vector([0.0, 0.0, mass.weight[0]])
+    # 跑道接触是独立的编译期开关；与 aero.mode 中起落架造成的气动增量不是同一开关。
     if cfg.ground.enabled:
         ground = GroundContact("ground", cfg.ground)
         eom.pos_ned_out >> ground.position
@@ -142,67 +141,57 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
     force_body >> eom.force_body
     moment_body >> eom.moment_body
 
-    # GTM nz follows the reference sign convention: upward specific load is
-    # positive even though FRD body +Z points down.
-    load_factor = non_gravitational_force / (-mass.weight[0])
-    nz = fr.math.vector([load_factor[2]])
+    # 法向过载 nz=-F_non_gravity,z/W：FRD 的 +Z 向下，因此向上的非重力载荷为正。
+    # 地面开启时计入接触力，但重力始终排除；用同一份扰动后重量 W 归一化。
+    load_factor = non_gravitational_force / (-mass.weight)
+    nz = load_factor[2]
 
-    # Physical feedback deliberately excludes command telemetry. This makes it
-    # causal when a controller is nested around GTMSystem. The legacy 21-vector
-    # is concatenated below so external users retain the frozen gtm_ad layout.
-    aero.gamma >> sensor.gamma
+    # 刚体按 NED 速度给出航迹角（rad），在 Sensor 的 deg 输入边界转换一次。
+    fr.math.degrees(eom.gamma) >> sensor.gamma
+    # 气流角为 deg；刚体欧拉角/角速率为 rad、rad/s，Sensor 内部统一转换为度制观测。
     aero.alpha >> sensor.alpha
     aero.beta >> sensor.beta
-    aero.V >> sensor.V
-    aero.altitude >> sensor.altitude
+    aero.VTAS >> sensor.V
+    altitude >> sensor.altitude
     eom.euler_angles >> sensor.euler
     eom.omega_body_out >> sensor.omega_body
     nz >> sensor.nz
     aero.qbar >> sensor.qbar
     actuator_position >> sensor.act_pos
-    n[:17] >> sensor.noise
+    n >> sensor.noise
 
-    clean_y = fr.math.concatenate([sensor.clean_feedback, u])
-    measurement = fr.math.concatenate([sensor.feedback, u])
+    # 观测只包含 Sensor 的 17 个物理通道，命令保留在输入 u 中，不重复输出。
+    fr.export(y=sensor.output, clean_y=sensor.clean_output)
 
-    quat_dot_reference = Quaternion.derivative(eom.quat_out, eom.omega_body_out)
-
-    fr.export(
-        y=measurement,
-        clean_y=clean_y,
-        feedback_y=sensor.feedback,
-        clean_feedback_y=sensor.clean_feedback,
-        pos_ned=eom.pos_ned_out,
-        vel_body=eom.vel_body_out,
-        vel_ned=eom.velocity_ned,
-        quat=eom.quat_out,
-        omega_body=eom.omega_body_out,
-        euler=eom.euler_angles,
-        gamma=aero.gamma,
-        altitude=aero.altitude,
-        alpha=aero.alpha,
-        beta=aero.beta,
-        V=aero.V,
-        VE=aero.VE,
+    # 逐项保留各组件 out 中未被 x、y/clean_y 或子组件 effects 覆盖的诊断。
+    # 作动器实际位置、气流角/空速/动压、发动机有效油门、姿态欧拉角/航迹角
+    # 已在观测中；刚体位置/机体速度/四元数/角速率直接从 x 读取，不重复保存。
+    # Aero 系数/雷诺数、Wind 稳态风/阵风已有各自 effects，不在根再声明。
+    fr.effects(
+        # 当前运行时质量特性，包含参数扰动。
+        weight=mass.weight,
+        mass=mass.mass,
+        inertia=mass.inertia,
+        inertia_inv=mass.inertia_inv,
+        # 观测未单列的大气/空速输出。
+        VE=aero.VEAS,
         mach=aero.mach,
-        qbar=aero.qbar,
-        nz=nz,
-        uvw=wind.uvw,
+        pressure_ratio=aero.pressure_ratio,
+        # 刚体状态之外的坐标变换、航向和导数输出。
+        DCM=eom.DCM,
+        vel_ned=eom.velocity_ned,
+        chi=eom.chi,
+        acceleration_body=eom.acceleration_body,
+        angular_acceleration_body=eom.angular_acceleration_body,
+        # 尚未由其他 effects 提供的角阵风和分项载荷。
         wind_omega=wind.omega,
         force_aero=aero.force,
         force_engine=engine.force,
-        force_gravity=gravity_body,
         moment_aero=aero.moment,
         moment_engine=engine.moment,
-        coefficients=aero.coefficients,
-        reynolds=aero.reynolds,
-        quat_dot_reference=quat_dot_reference,
-        surface_position=surface_position,
-        actuator_position=actuator_position,
-        effective_throttle=engine.effective_throttle,
     )
     if cfg.ground.enabled:
-        fr.export(
+        fr.effects(
             ground_force_body=ground_force_body,
             ground_moment_body=ground_moment_body,
             ground_penetrations=ground.penetrations,
@@ -211,130 +200,3 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
             ground_lateral_forces=ground.lateral_forces,
             ground_contact_count=ground.contact_count,
         )
-
-
-def build_initial_state[ArrayT](
-    model: fr.CompiledModel[ArrayT],
-    cfg: GTMConfig = _DEFAULT_CONFIG,
-    *,
-    throttle: float = 0.0,
-) -> np.ndarray:
-    """用完整路径构建默认的 25 元物理初始状态。
-
-    Args:
-        model: 编译后的 GTM 模型，提供 `x.build` 状态索引。
-        cfg: GTM 配置，提供滞后矩阵以把 `throttle` 换算成配平一致的滞后状态。
-        throttle: 期望配平有效油门百分比，默认 0；调用方须把 `Root::u[3]` 也
-            设成同一个值，否则起点不是配平点。
-
-    Returns:
-        np.ndarray: 按所选发动机模型布局构造的浮点状态向量，依次为 13 个刚体状态、3 个
-            作动器状态、1 或 2 个发动机滞后状态与 8 个 Dryden 成形滤波器状态，
-            四元数按标量在前排列。
-
-    Note:
-        默认为机体系 50 m/s 前向速度，姿态与角速率为零，位置在 NED 原点。
-        `Root.engine::lag_state` 由 `cfg.engine.lag.trim_state(throttle)` 给出，
-        不是零向量：把滞后状态置零会在起点制造一段推力暂态。
-    """
-    lag_state = np.asarray(cfg.engine.lag.trim_state(throttle))
-    return model.to_numpy(
-        model.x.build(
-            {
-                "Root.eom::pos_ned": np.zeros(3),
-                "Root.eom::vel_body": np.array([50.0, 0.0, 0.0]),
-                "Root.eom::quat": np.array([1.0, 0.0, 0.0, 0.0]),
-                "Root.eom::omega_body": np.zeros(3),
-                "Root.actuator::position": np.zeros(3),
-                "Root.engine::lag_state": lag_state,
-                "Root.wind.dryden::u_gw": np.zeros(1),
-                "Root.wind.dryden::v_gw": np.zeros(2),
-                "Root.wind.dryden::w_gw": np.zeros(2),
-                "Root.wind.dryden::p_gw": np.zeros(1),
-                "Root.wind.dryden::q_gw": np.zeros(1),
-                "Root.wind.dryden::r_gw": np.zeros(1),
-            }
-        )
-    ).reshape(-1)
-
-
-def build_ground_initial_state[ArrayT](
-    model: fr.CompiledModel[ArrayT],
-    cfg: GTMConfig,
-    *,
-    forward_speed_mps: float = 0.0,
-    altitude_agl_m: float = 0.0,
-    sink_rate_mps: float = 0.0,
-    throttle: float = 0.0,
-) -> np.ndarray:
-    """构建跑道相对的地面滑行或接地初始状态。
-
-    Args:
-        model: 编译后的 GTM 模型，提供 `x.build` 状态索引。
-        cfg: GTM 配置，提供地面接触点与参考重量，用于解算静态停机姿态。
-        forward_speed_mps: 沿 NED 北向的水平速度，单位 m/s，须为有限非负值。
-        altitude_agl_m: 离地高度，单位 m，须为有限非负值。
-        sink_rate_mps: 沿 NED 下向的下降率，单位 m/s，须为有限非负值。
-        throttle: 期望配平有效油门百分比，默认 0；调用方须把 `Root::u[3]` 也
-            设成同一个值。
-
-    Returns:
-        np.ndarray: 按所选发动机模型布局构造的浮点状态向量，姿态由静态地面姿态与
-            `altitude_agl_m` 决定，机体系速度由 NED 速度旋转得到。
-
-    Raises:
-        ValueError: 任一速度或高度参数非有限或为负时抛出。
-
-    Note:
-        `forward_speed_mps` 是水平速度，`sink_rate_mps` 是 NED 下向速度；
-        两者在写入刚体状态前旋转到 FRD，因此带俯仰的停机姿态不会引入额外的
-        爬升或下降率。`Root.engine::lag_state` 同样由 `trim_state(throttle)` 给出。
-    """
-    lag_state = np.asarray(cfg.engine.lag.trim_state(throttle))
-
-    if not np.isfinite(forward_speed_mps) or forward_speed_mps < 0.0:
-        raise ValueError("forward_speed_mps must be finite and nonnegative")
-    if not np.isfinite(altitude_agl_m) or altitude_agl_m < 0.0:
-        raise ValueError("altitude_agl_m must be finite and nonnegative")
-    if not np.isfinite(sink_rate_mps) or sink_rate_mps < 0.0:
-        raise ValueError("sink_rate_mps must be finite and nonnegative")
-    down, roll, pitch = solve_static_ground_pose(cfg.ground, cfg.aircraft.w0)
-    down -= altitude_agl_m
-    roll_half = roll * 0.5
-    pitch_half = pitch * 0.5
-    quat = np.array(
-        [
-            np.cos(roll_half) * np.cos(pitch_half),
-            np.sin(roll_half) * np.cos(pitch_half),
-            np.cos(roll_half) * np.sin(pitch_half),
-            -np.sin(roll_half) * np.sin(pitch_half),
-        ]
-    )
-    cr, sr = np.cos(roll), np.sin(roll)
-    cp, sp = np.cos(pitch), np.sin(pitch)
-    dcm = np.array(
-        [
-            [cp, sr * sp, cr * sp],
-            [0.0, cr, -sr],
-            [-sp, sr * cp, cr * cp],
-        ]
-    )
-    velocity_body = dcm.T @ np.array([forward_speed_mps, 0.0, sink_rate_mps])
-    return model.to_numpy(
-        model.x.build(
-            {
-                "Root.eom::pos_ned": np.array([0.0, 0.0, down]),
-                "Root.eom::vel_body": velocity_body,
-                "Root.eom::quat": quat,
-                "Root.eom::omega_body": np.zeros(3),
-                "Root.actuator::position": np.zeros(3),
-                "Root.engine::lag_state": lag_state,
-                "Root.wind.dryden::u_gw": np.zeros(1),
-                "Root.wind.dryden::v_gw": np.zeros(2),
-                "Root.wind.dryden::w_gw": np.zeros(2),
-                "Root.wind.dryden::p_gw": np.zeros(1),
-                "Root.wind.dryden::q_gw": np.zeros(1),
-                "Root.wind.dryden::r_gw": np.zeros(1),
-            }
-        )
-    ).reshape(-1)

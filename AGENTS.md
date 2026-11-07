@@ -10,6 +10,8 @@ NASA Generic Transport Model 的 FlyRuler 实现，数值行为以冻结的 `gtm
 
 ## 本目录特有边界
 
+- **必须**：依赖、锁文件、虚拟环境和验证从本项目解析，暂时以 path/editable 方式使用 `../../packages/fly_ruler`，不借用根虚拟环境。
+
 - **必须**：`gtm_ad` 仅用于生成冻结 `.npz` reference；常规测试不依赖外部 checkout。
 - **必须**：保持 full-scale/scale model、四种 flap/gear 构型、表格方向与单位转换一致。
 - **必须**：使用 NED/FRD、scalar-first quaternion，高度为 `-pos_ned[2]`。

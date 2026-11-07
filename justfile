@@ -22,7 +22,7 @@ setup:
 # 安装手柄控制示例的可选依赖
 setup-stick:
     echo "Synchronizing optional fly-stick dependencies..."
-    uv run --with-editable ../../packages/fly_stick --with-editable ../../packages/fly_ruler_proto/bindings/python python -c "import fly_stick, fly_ruler_proto_python"
+    uv run --extra stick --extra proto python -c "import fly_stick, fly_ruler_proto_python"
     echo "✓ fly-stick example setup complete!"
 
 # ============================================================
@@ -34,12 +34,12 @@ setup-stick:
 # 累积到约 13 GB，在 16 GB 的 CI runner 上会被 OOM 杀掉（exit 137）。
 test:
     echo "Running all tests..."
-    for file in tests/test_*.py; do uv run pytest "$file" -v || exit 1; done
+    for file in tests/test_*.py; do uv run --extra stick --extra proto pytest "$file" -v || exit 1; done
     echo "✓ All tests passed!"
 
 # 运行特定测试文件
 test-one TEST:
-    uv run pytest {{TEST}} -v
+    uv run --extra stick --extra proto pytest {{TEST}} -v
 
 # ============================================================
 # 代码质量
@@ -63,7 +63,7 @@ check-lint:
 
 check-types:
     echo "Running type check..."
-    uv run mypy src/ tests/ examples/ --exclude 'tests/generate_gtm_backend_reference\.py'
+    uv run --extra stick --extra proto mypy src/ tests/ examples/ --exclude 'tests/generate_gtm_backend_reference\.py'
 
 build:
     echo "Building wheel and source distribution..."
@@ -80,8 +80,8 @@ fix:
 # 示例
 # ============================================================
 
-example-inspect:
-    uv run python examples/inspect_model.py
+example-inspect *ARGS:
+    uv run python examples/inspect_model.py {{ARGS}}
 
 example-simulate:
     uv run python examples/simulate.py
@@ -106,10 +106,11 @@ example-ground *ARGS:
 
 # 使用 fly_stick 手柄控制 GTM，并可选发送 fly_ruler_proto 状态
 example-fly-stick *ARGS:
-    uv run --with-editable ../../packages/fly_stick --with-editable ../../packages/fly_ruler_proto/bindings/python python examples/fly_stick_gtm.py {{ARGS}}
+    uv run --extra stick --extra proto python examples/fly_stick_gtm.py {{ARGS}}
 
 # 运行全部离线示例
-test-examples: example-inspect example-simulate example-disturbances example-trim example-backends
+test-examples: example-simulate example-disturbances example-trim example-backends
+    uv run python examples/inspect_model.py --no-graph
     uv run python examples/ground_operations.py --duration 0.01
     echo "✓ All offline examples passed!"
 
