@@ -48,7 +48,7 @@ test-one TEST:
 # 代码格式化
 fmt:
     echo "Formatting Python code..."
-    uv run ruff format src/ tests/ examples/
+    uv run ruff format src/ tests/ examples/ scripts/check_install.py
     echo "✓ Formatting complete!"
 
 # 代码检查 (Lint + 格式 + 类型)
@@ -58,12 +58,12 @@ check: check-lint check-types
 # Lint 检查
 check-lint:
     echo "Checking Python code..."
-    uv run ruff check src/ tests/ examples/ --exclude generate_gtm_backend_reference.py
-    uv run ruff format src/ tests/ examples/ --check --exclude generate_gtm_backend_reference.py
+    uv run ruff check src/ tests/ examples/ scripts/check_install.py --exclude generate_gtm_backend_reference.py
+    uv run ruff format src/ tests/ examples/ scripts/check_install.py --check --exclude generate_gtm_backend_reference.py
 
 check-types:
     echo "Running type check..."
-    uv run --extra stick --extra proto mypy src/ tests/ examples/ --exclude 'tests/generate_gtm_backend_reference\.py'
+    uv run --extra stick --extra proto mypy src/ tests/ examples/ scripts/check_install.py --exclude 'tests/generate_gtm_backend_reference\.py'
 
 build:
     echo "Building wheel and source distribution..."
@@ -72,8 +72,8 @@ build:
 # 修复自动可修复的 linting 问题
 fix:
     echo "Fixing Python code..."
-    uv run ruff check --fix src/ tests/ examples/
-    uv run ruff format src/ tests/ examples/
+    uv run ruff check --fix src/ tests/ examples/ scripts/check_install.py
+    uv run ruff format src/ tests/ examples/ scripts/check_install.py
     echo "✓ Fixes applied!"
 
 # ============================================================

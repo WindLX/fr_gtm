@@ -1,0 +1,102 @@
+name: GTM CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gtm-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_NO_SYNC: "1"
+  JAX_PLATFORMS: cpu
+  JAX_ENABLE_X64: "true"
+  XLA_PYTHON_CLIENT_PREALLOCATE: "false"
+  OMP_NUM_THREADS: "1"
+
+jobs:
+  check:
+    name: Lint and types
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.6"
+          python-version: "3.12"
+          enable-cache: true
+      - uses: extractions/setup-just@v4
+        with:
+          just-version: "1.59.0"
+      # 不加 --locked：CI 主动测试 PyPI 的最新稳定 SDK，而非签入的解析结果。
+      - name: Install public dependencies and upgrade the SDK
+        run: uv sync --extra jax --extra stick --extra proto --upgrade-package fly-ruler
+      - run: just check
+
+  regression:
+    name: Numerical regressions and offline examples
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.6"
+          python-version: "3.12"
+          enable-cache: true
+      - uses: extractions/setup-just@v4
+        with:
+          just-version: "1.59.0"
+      - name: Install public dependencies and upgrade the SDK
+        run: uv sync --extra jax --extra stick --extra proto --upgrade-package fly-ruler
+      - name: Install CPU PyTorch for optional backend regressions
+        run: uv pip install --python .venv/bin/python torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
+      # just test 每个文件独立启动进程，释放大型编译图；不启动真实设备或遥测服务。
+      - run: just test
+      - run: just test-examples test-examples-stick
+
+  package:
+    name: Build and install distributions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          version: "0.13.6"
+          python-version: "3.12"
+          enable-cache: true
+      - uses: extractions/setup-just@v4
+        with:
+          just-version: "1.59.0"
+      - run: just build
+      - name: Check distribution metadata
+        run: uvx --from twine==7.0.0 twine check dist/*
+      - name: Install wheel and sdist outside the source environment
+        shell: bash
+        run: |
+          for artifact in dist/*.whl dist/*.tar.gz; do
+            environment="$RUNNER_TEMP/install-${artifact##*/}"
+            uv venv --python 3.12 "$environment"
+            uv pip install --python "$environment/bin/python" --index-url https://pypi.org/simple "$artifact"
+            (cd "$RUNNER_TEMP" && "$environment/bin/python" -I "$GITHUB_WORKSPACE/scripts/check_install.py")
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fr-gtm-distributions
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
