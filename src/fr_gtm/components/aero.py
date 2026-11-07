@@ -412,9 +412,9 @@ def _hykal(
     omega 表示沿来流轴的稳转分量；osc 表示供各轴动导表使用的剩余分量，
     不是直接测得的振荡频率，也不要求与 e_V 正交。这不是点积正交投影。
 
-    分解规则优先用 p 确定 omega 并令 p_osc=0；仅当剩余 r 不反号且幅值
-    不增大时接受。否则尝试用 r 确定 omega 并令 r_osc=0，要求剩余 p 同样
-    不反号、不增大。两者均不满足则 omega=0，原角速率全部保留为剩余运动。
+    分解规则先试用 p 确定 omega 并令 p_osc=0；仅当剩余 r 不反号且幅值
+    不增大时接受。随后独立试用 r 确定 omega 并令 r_osc=0，要求剩余 p
+    同样不反号、不增大；若也有效则覆盖 p 候选。两者均不满足则 omega=0。
 
     Args:
         alpha: 迎角，deg；进入三角函数前转为 rad。
@@ -441,35 +441,34 @@ def _hykal(
     sacb = sa * cb
 
     # 候选一：omega1=p/e_Vx，消去剩余滚转角速率。
-    # 1e-10 是原分支判据；safe_cacb 让未被选中的符号分支也不发生除零，
-    # 不是把接近零的真实分母裁到 1。只有判据满足时该候选才会被采用。
-    case1 = fr.math.logic_and(fr.math.abs(cacb) > 1e-10, fr.math.abs(p) > 1e-10)
-    safe_cacb = fr.math.if_else(fr.math.abs(cacb) > 1e-10, cacb, 1.0)
+    # NASA 原规则只排除精确零。Signal 的 ==/!= 是结构比较，故用 abs(x)>0
+    # 构造数值非零判据；只替换真正为零的分母，避免未选中符号支路出现 0/0。
+    case1 = fr.math.logic_and(fr.math.abs(cacb) > 0.0, fr.math.abs(p) > 0.0)
+    safe_cacb = fr.math.if_else(fr.math.abs(cacb) > 0.0, cacb, 1.0)
     omega1 = p / safe_cacb
-    r_osc1 = r - omega1 * sacb
+    r_osc1 = r - omega1 * sa * cb
     case1 = fr.math.logic_and(
         case1,
         fr.math.logic_and(fr.math.abs(r_osc1) <= fr.math.abs(r), r_osc1 * r >= 0.0),
     )
 
     # 候选二：omega2=r/e_Vz，消去剩余偏航角速率。
-    # 与候选一互斥；若两者都可行，仍优先选择候选一，保留原模型分支次序。
-    case2 = fr.math.logic_and(fr.math.abs(sacb) > 1e-10, fr.math.abs(r) > 1e-10)
-    safe_sacb = fr.math.if_else(fr.math.abs(sacb) > 1e-10, sacb, 1.0)
+    # 原模型顺序测试而非 if/else：候选二有效时覆盖候选一。
+    case2 = fr.math.logic_and(fr.math.abs(sacb) > 0.0, fr.math.abs(r) > 0.0)
+    safe_sacb = fr.math.if_else(fr.math.abs(sacb) > 0.0, sacb, 1.0)
     omega2 = r / safe_sacb
-    p_osc2 = p - omega2 * cacb
+    p_osc2 = p - omega2 * ca * cb
     case2 = fr.math.logic_and(
         case2,
         fr.math.logic_and(fr.math.abs(p_osc2) <= fr.math.abs(p), p_osc2 * p >= 0.0),
     )
-    case2 = fr.math.logic_and(case2, fr.math.logic_not(case1))
 
     # 选定同一个 omega 后，从三个轴都扣除 omega*e_V。
     # q_osc=q-omega*sin(beta) 只在有效候选下修正；不能只扣 p 或 r。
-    omega = fr.math.if_else(case1, omega1, fr.math.if_else(case2, omega2, 0.0))
-    p_osc = fr.math.if_else(case1, 0.0, fr.math.if_else(case2, p_osc2, p))
+    omega = fr.math.if_else(case2, omega2, fr.math.if_else(case1, omega1, 0.0))
+    p_osc = fr.math.if_else(case2, p_osc2, fr.math.if_else(case1, 0.0, p))
     q_osc = fr.math.if_else(fr.math.logic_or(case1, case2), q - omega * sb, q)
-    r_osc = fr.math.if_else(case1, r_osc1, fr.math.if_else(case2, 0.0, r))
+    r_osc = fr.math.if_else(case2, 0.0, fr.math.if_else(case1, r_osc1, r))
 
     # D=diag(b,Cbar,b)/(2V)，单位 s；D @ [p_osc,q_osc,r_osc] 后无量纲。
     # 下面的向量逐元素乘法与这个对角矩阵乘法等价，不是坐标系旋转。

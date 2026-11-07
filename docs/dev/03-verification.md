@@ -6,7 +6,7 @@ GTM 的回归分三层：结构回归看路径与维度，数值回归看与外�
 
 | 改什么 | 主要影响 | 先跑什么 |
 | --- | --- | --- |
-| `components/aero.py` 与 `data/aero_tables.npz` | 系数与载荷，配平点可能移动 | `just test-one tests/test_reference.py`，再 `just example-trim` |
+| `components/aero.py` 与 `data/aero_tables.npz` | 系数与载荷，配平点可能移动 | HyKal 先跑 `just test-one tests/test_hykal.py`，再 `just test-one tests/test_reference.py` 与 `just example-trim` |
 | `config.py` 的字段与默认值 | 配置派生、组件几何注入、缩放与构型 | `just test-one tests/test_config.py` |
 | `system.py` 的块接线与 `fr.export` | 完整路径、观测布局、状态维数 | `just test-one tests/test_system.py` |
 | `components/mass.py` | 重量与惯量，配平与动导都不变但力矩尺度变 | `just test-one tests/test_reference.py` |
@@ -35,6 +35,8 @@ GTM 的回归分三层：结构回归看路径与维度，数值回归看与外�
 
 冻结参考可以重新生成，但重生成意味着接受新的数值基线：先确认改动是有意为之，再在提交说明里写清是表格、配置还是方程的差异。
 
+HyKal 已恢复 NASA 原始精确零判据与 R 覆盖 P 的顺序，旧实现的 $10^{-10}$ 死区与 P 优先不再是验收合同；两份冻结 NPZ 保留，不以重生成或放宽容差消除差异。边界规则由 `tests/test_hykal.py` 的独立标量转录对照；近零方向分母会放大度/弧度换算的一个 ulp 差异，因此该测试读取各后端三角值，独立计算分支、剩余量和尺度。重新使用该模型的 true/pred 或其他实例时，必须从修正后的同一源声明重新编译；旧缓存/归档仍包含旧规则。
+
 两份参考都把油门建成一阶作动器状态，原二阶模型用例显式选择 `JetCatThrottleLagConfig`，因此 `tests/test_reference.py` 逐通道比对时跳过参考布局里的油门导数槽，改用配平反解得到的解析式核对；`tests/test_backends.py` 的轨迹用例油门指令恒为 40%，默认一阶滞后停在配平状态，整条轨迹仍与参考一致。新增的 `tests/test_engine_lag.py` 承担该通道自身的解析回归。
 
 冻结参考的有效油门观测通道不施加噪声（参考生成源 `gtm_ad/core/noise/sensor.py` 固定该通道 noise_std=0）。当前 `SensorConfig.throttle` 的默认标准差为 1 个油门百分比点，因此参考夹具显式采用零油门噪声标定；`test_current_throttle_noise_calibration` 独立验证当前默认值。两种标定不混为同一数值合同，冻结 NPZ 保持原值。
@@ -43,6 +45,7 @@ GTM 的回归分三层：结构回归看路径与维度，数值回归看与外�
 
 | 测试 | 覆盖内容 |
 | --- | --- |
+| `tests/test_hykal.py` | NASA 独立规则对照；±1e−10 邻域及等号、斜缝两侧、普通/零速率、微小非零分母、零分母、R 覆盖与重构；NumPy、CasADi SX/MX、native、JAX 及零分母符号 Jacobian |
 | `tests/test_aero.py` | 独立气动块、单一配置、显式几何、载荷换算与元数据 |
 | `tests/test_config.py` | `Mode` 四种构型乘两套尺度都能装载，扁平配置与几何注入与非法输入 |
 | `tests/test_model_tools.py` | 根/嵌套路径、一阶/二阶与两尺度初值、有风来流、参数、Gaussian 噪声、观测解析、Graph 服务 |

@@ -23,7 +23,7 @@
 | 构型增量 | `flap = [-0.0282,0,-0.2989,0,0.0728,0]*2`、`gear = [-0.016,0,0.014,0,-0.008,0]*2`；半襟翼乘 0.5，全襟翼加 `flap`，全襟翼加起落架再加 `gear`，`normal` 全零 |
 | 操纵导数 | 升降舵用四维网格 `[alpha_ele, beta_ele, stab_ele, elev_bp]`（`n_out=3`），`elevator_delta = 0.25*(table(alpha,beta,0,elevator) - stabilizer)`；副翼用 `table(alpha,-beta,-aileron)*[1,-1,1,-1,1,-1] + table(alpha,beta,aileron)`；方向舵用 `where(rudder>=0, -(table(alpha,-beta,-rudder)-table(alpha,-beta,0)), table(alpha,beta,rudder)-table(alpha,beta,0))` |
 | 方向舵零点 | 上面的单侧写法在零点保持单侧导数；旧写法在 CasADi/JAX 下会因 `sign(0)=0` 误报零舵效 |
-| 动导系数 | `_hykal(alpha, beta, tas, pqr, span, chord)` 做 Kalviste 速率拆分，分母带 `abs(cacb)>1e-10`、`abs(p)>1e-10` 等安全分支 |
+| 动导系数 | `_hykal(alpha, beta, tas, pqr, span, chord)` 按 NASA 原始精确零判据做 Kalviste 速率拆分；先试 P，再试 R，R 有效时覆盖 P |
 | 不确定度顺序 | 运行时扰动按 gtm_ad 的 31 参数顺序排列：`c_static_unc(6)`、`c_e_unc(3)`、`c_a_unc(6)`、`c_r_unc(6)`，落在风与质量参数之后 |
 
 `resources.py` 用有类型的资源组保存雷诺数、基本机体、操纵面和动导表。加载时检查轴有限、严格递增，表值有限且形状与各轴和输出通道数一致；数组从 `cfg.aero.tables.reynolds`、`basic_airframe`、`control_surfaces`、`dynamic_derivatives` 读取。单一的 `AeroConfig` 同时保存构型、面积、共享的 `b/Cbar`、重心、气动参考点和操纵面力臂；`Aero` 只消费该配置。整机通过 `GTMConfig.fullscale()` 或 `GTMConfig.subscale()` 注入几何。修改资源内容不改变源表轴序或单位转换。
@@ -50,7 +50,9 @@ cfg.aero.extrapolation_method = "linear"
 
 先把度制迎角/侧滑角转为弧度，构造机体系来流单位向量 $e_V=[\cos\alpha\cos\beta,\sin\beta,\sin\alpha\cos\beta]^T$。HyKal 按 $[p,q,r]^T=\Omega e_V+\omega_{osc}$ 分离流向轴稳转与剩余各轴运动，输入角速率均为扣除角阵风后的 rad/s；这不是正交投影，剩余分量不要求垂直于来流轴。
 
-优先令 $\Omega=p/e_{V,x}$、$p_{osc}=0$，且要求剩余 $r_{osc}$ 与原 $r$ 同号、幅值不增大。若不满足，再尝试 $\Omega=r/e_{V,z}$、$r_{osc}=0$，要求剩余 $p_{osc}$ 同号且不增大。两个候选互斥并有明确优先级；均不满足时令 $\Omega=0$，保留原角速率。每个有效候选都从三个轴扣除 $\Omega e_V$，其中 $q_{osc}=q-\Omega\sin\beta$。
+依据 [NASA GTM_DesignSim](https://github.com/nasa/GTM_DesignSim) 的 `gtm_design/gtm_design.slx` 内嵌 `simulink/stateflow.xml` 中 `hykal`（历史 MDL 提交 `9ddd474557e1cd468044764a2e3827613f0d3033` 第 47227 行起同式）：先试 $\Omega=p/e_{V,x}$、$p_{osc}=0$，要求剩余 $r_{osc}$ 与原 $r$ 不反号、幅值不增大；随后独立尝试 $\Omega=r/e_{V,z}$、$r_{osc}=0$，要求剩余 $p_{osc}$ 同样不反号、不增大。R 候选有效时覆盖先前的 P 候选；均不满足时令 $\Omega=0$，保留原角速率。每个有效候选都从三个轴扣除 $\Omega e_V$，其中 $q_{osc}=q-\Omega\sin\beta$。
+
+候选仅在对应速率与方向分母**精确非零**时参与选择；没有 $10^{-10}$ 死区。实现用 `abs(x)>0` 构造数值判据，避免 Signal 的 `==`/`!=` 结构比较；安全分母只把真正的零换成 1，以免未选中符号支路发生 `0/0`，非零分母不裁剪。剩余量按原式乘法顺序计算，以保留斜缝附近的浮点分支含义。该修正恢复原离散选择，不增加平滑或正则化。
 
 以 $D=\operatorname{diag}(b,\bar c,b)/(2V)$ 将剩余角速率无量纲化，得到 $[\hat p,\hat q,\hat r]^T=D\omega_{osc}$；稳转坐标为 $\hat\Omega=\Omega b/(2V)$。仅这条归一化路径将速度限为 1～10000 m/s，并将稳转查表坐标限为 ±0.5；真实动压和 Mach 不使用限幅后的速度。
 
