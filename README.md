@@ -1,8 +1,8 @@
 # fr_gtm
 
-GTM 是[独立 Git 仓库](https://github.com/WindLX/fr_gtm)，使用自己的 `uv.lock` 与 `.venv`，依赖 PyPI 的 `fly-ruler>=0.1.7`。可单独克隆，也可作为 FlyRuler 工作区的 `models/fr_gtm` 子模块使用；不依赖父仓源码或虚拟环境。
+GTM 是[独立 Git 仓库](https://github.com/WindLX/fr_gtm)，使用自己的 `uv.lock` 与 `.venv`，依赖 PyPI 的 `fly-ruler>=0.2.0`。可单独克隆，也可作为 FlyRuler 工作区的 `models/fr_gtm` 子模块使用；不依赖父仓源码或虚拟环境。
 
-当前开发源码使用新的 `compiler.prepare` / `compiler.compile` / `runtime.bind` 接口，不能与旧编译器 API 的 PyPI SDK 混用。独立发行前必须把 `fly-ruler` 的最低依赖提升到提供这些接口的新版本；使用已发布 SDK 时，请检出匹配的 GTM 发行版本。开发验收可在单独的临时虚拟环境中同时安装候选 SDK 与本仓，不替换日常 `.venv` 或锁文件。
+当前源码使用 `compiler.prepare` / `compiler.compile` / `runtime.bind` 接口，需要公开发行的 `fly-ruler>=0.2.0`。安装和验证均从本仓解析 PyPI 依赖，不需要父工作区源码或本地候选 SDK。
 
 ```bash
 git clone git@github.com:WindLX/fr_gtm.git
@@ -32,7 +32,7 @@ CPU JAX 使用 `uv sync --extra jax`；CUDA 后端使用 `jax-cuda12` 或 `jax-c
 - **回归**：`just test` 逐文件独立进程运行，覆盖冻结参考、NumPy/CasADi/JAX/native；随后运行离线示例和手柄 dry-run。CUDA、真实手柄和 Proto 服务联调不在这个 CPU 作业范围内。
 - **打包**：构建 wheel/sdist，检查元数据；两种文件分别装进干净环境，从已安装包加载两尺度、四构型气动资源并运行十步仿真。产物保留为 Actions artifact，不自动发布。
 
-CI 用 `uv sync --extra jax --extra stick --extra proto --upgrade-package fly-ruler` 主动解析 PyPI 的最新稳定 SDK；`>=0.1.7` 是当前依赖声明，不是版本锁定。新编译入口面向 fly-ruler 0.2.0；待其正式发布后更新最低依赖与锁文件，开发候选只在隔离环境验证。`UV_NO_SYNC=1` 让后续 just 命令复用本作业已解析的环境。安装验收也独立从 PyPI 解析 SDK，不引用父仓目录。
+CI 用 `uv sync --extra jax --extra stick --extra proto --upgrade-package fly-ruler` 主动解析 PyPI 的最新稳定 SDK；`>=0.2.0` 是当前依赖声明，不是版本锁定。签入的锁文件固定本次验收的 0.2.0。`UV_NO_SYNC=1` 让后续 just 命令复用本作业已解析的环境。安装验收也独立从 PyPI 解析 SDK，不引用父仓目录。
 
 本地复现同样的 SDK 升级与静态检查：
 

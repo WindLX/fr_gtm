@@ -6,16 +6,16 @@ readme = "README.md"
 authors = [{ name = "windlx", email = "1418043337@qq.com" }]
 requires-python = ">=3.12"
 dependencies = [
-    "fly-ruler>=0.1.7",
+    "fly-ruler>=0.2.0",
     "numpy",
     "pydantic>=2.13.4",
     "typer>=0.25.1",
 ]
 
 [project.optional-dependencies]
-jax = ["fly-ruler[jax]>=0.1.7"]
-jax-cuda12 = ["fly-ruler[jax-cuda12]>=0.1.7"]
-jax-cuda13 = ["fly-ruler[jax-cuda13]>=0.1.7"]
+jax = ["fly-ruler[jax]>=0.2.0"]
+jax-cuda12 = ["fly-ruler[jax-cuda12]>=0.2.0"]
+jax-cuda13 = ["fly-ruler[jax-cuda13]>=0.2.0"]
 stick = ["fly-stick>=0.1.2"]
 proto = ["fly-ruler-proto-python>=0.4.0"]
 all = ["fr-gtm[jax,stick,proto]"]
