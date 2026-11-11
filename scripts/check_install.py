@@ -4,9 +4,10 @@ import sys
 from importlib.metadata import distribution, version
 from pathlib import Path
 
-import fly_ruler_core as fr
 import fly_ruler_std
 import numpy as np
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core import api as fr
 
 import fr_gtm
 
@@ -25,8 +26,14 @@ def main() -> None:
         for mode in fr_gtm.Mode:
             factory(mode=mode)
     cfg = fr_gtm.GTMConfig.fullscale()
-    model = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=0.01)).compile(
-        fr_gtm.GTMSystem.build("Root", cfg), target=fr.targets.numpy
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(
+                fr_gtm.GTMSystem.build("Root", cfg),
+                settings=ModelSettings(integrator="rk4", dt=0.01),
+            ),
+            target=targets.numpy,
+        )
     )
     x, xd, u, p = fr_gtm.init(model, cfg, position=(0, 0, -1000), airdata=(0, 0, 100))
     for step in range(10):

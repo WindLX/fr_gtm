@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import fly_ruler_core as fr
 import numpy as np
 import pytest
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core import api as fr
 from numpy.typing import NDArray
 
 from fr_gtm import FirstOrderThrottleLagConfig, GTMConfig, JetCatThrottleLagConfig
@@ -49,8 +50,14 @@ def test_engine_loads_matches_engine_at_effective_throttle(
             loads_moment=loads.moment,
         )
 
-    model = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=0.005)).compile(
-        EngineAndLoads.build("EngineAndLoads"), target=fr.targets.casadi
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(
+                EngineAndLoads.build("EngineAndLoads"),
+                settings=ModelSettings(integrator="rk4", dt=0.005),
+            ),
+            target=targets.casadi,
+        )
     )
     # EngineLoads没有增加连续或数字存储；原发动机保留配置对应的滞后阶数。
     assert model.n_x == (1 if isinstance(lag, FirstOrderThrottleLagConfig) else 2)
@@ -151,8 +158,14 @@ def test_engine_loads_compiles_in_command_feedback_without_feedthrough(
             engine_moment=engine.moment,
         )
 
-    model = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=0.005)).compile(
-        EngineLoadFeedback.build("EngineLoadFeedback"), target=fr.targets.casadi
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(
+                EngineLoadFeedback.build("EngineLoadFeedback"),
+                settings=ModelSettings(integrator="rk4", dt=0.005),
+            ),
+            target=targets.casadi,
+        )
     )
     assert model.n_x == (1 if isinstance(lag, FirstOrderThrottleLagConfig) else 2)
     assert model.n_xd == 0

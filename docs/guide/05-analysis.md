@@ -44,9 +44,9 @@
 
 <<< @/../models/fr_gtm/examples/backend_compare.py#05-analysis-1
 
-native 后端在另外两个示例里出现：`ground_operations.py` 用 `compiler.convert(symbolic, target=fr.targets.NativeTarget())` 把 CasADi 符号结果转成 C++ 扩展，`benchmark_jax_compile.py` 单独度量 JAX 的跟踪、lower 与编译耗时，结果写进 `build/jax_compile_benchmark.json`。
+native 后端在另外两个示例里出现：`ground_operations.py` 用 `compiler.compile(symbolic.program, target=targets.NativeTarget())` 从相同模型程序生成 C++ 扩展，`benchmark_jax_compile.py` 单独度量 JAX 的跟踪、lower 与编译耗时，结果写进 `build/jax_compile_benchmark.json`。
 
-产物检查用 `inspect_model.py`：`model.artifact.path` 给产物目录，`artifact.file(fr.ArtifactFile.SYSTEM_IR / BACKEND_SOURCE / LAYOUT)` 给拓扑、生成源码与布局文件，`artifact.cache_hit` 说明是否命中缓存。
+产物检查用 `inspect_model.py`：`artifacts.save(target, output_dir=...)` 保存可恢复产物，`artifacts.open(path).describe()` 读取描述；缓存位置由独立的 `OperationContext(store=...)` 指定。
 
 ## 产物与示例
 
@@ -56,7 +56,7 @@ native 后端在另外两个示例里出现：`ground_operations.py` 用 `compil
 | `just example-backends` | 三个后端的编译耗时与相对 NumPy 的偏差 |
 | `just example-ground --scenario takeoff --backend native` | C++/pybind11 扩展缓存与地面场景记录 |
 | `just benchmark-jax-compile` | `models/fr_gtm/build/jax_compile_benchmark.json` |
-| `just example-inspect` | 产物路径、缓存命中、完整路径清单与 Graph WebUI |
+| `just example-inspect` | 产物路径、描述、完整路径清单与 Graph WebUI |
 
 ## 这一章用到的 API
 
@@ -65,8 +65,8 @@ native 后端在另外两个示例里出现：`ground_operations.py` 用 `compil
 - [`fly_ruler_std.runtime.trim.TrimSpec`](/api/std/runtime/trim/index)：固定值、导数目标与初猜的写法
 - [`fly_ruler_std.runtime.linearize.LinearizationSolver`](/api/std/runtime/linearize/index)：A、B、C、D 的求解
 - [`fly_ruler_std.runtime.linearize.LinearizationSpec`](/api/std/runtime/linearize/index)：操作点与键
-- [`fly_ruler_core.JaxRuntimePolicy`](/api/core/jax_runtime)：JAX 平台、预分配与 x64 开关
-- [`fly_ruler_core.ArtifactFile`](/api/core/artifacts/index)：产物文件的枚举
+- [`fly_ruler_core.runtime.jax_config.JaxRuntimePolicy`](/api/core/runtime/jax_config)：JAX 平台、预分配与 x64 开关
+- [`fly_ruler_core.artifacts`](/api/core/artifacts/index)：保存、读取与运行恢复
 
 ## 边界与常见坑
 
@@ -77,7 +77,7 @@ native 后端在另外两个示例里出现：`ground_operations.py` 用 `compil
 | 初始猜测影响收敛 | 八个 Dryden 状态、三个舵面位置与发动机滞后状态要一起猜，离工作点太远会不收敛 |
 | 键的顺序决定矩阵布局 | `x_keys`、`u_keys`、`y_keys` 的顺序与 A、B、C、D 的行列一一对应 |
 | 后端偏差超出预期 | 对比时用同一初值与 `dt`；JAX 默认 float32，若参考要求 float64 则在首次导入前显式启用 x64 |
-| native 首次编译慢 | 首次生成并缓存 C++ 扩展，后续运行复用缓存 |
+| native 首次编译慢 | 首次生成 C++ 扩展，显式配置 Store 后可跨运行复用缓存 |
 
 ## 相关页面
 

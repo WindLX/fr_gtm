@@ -1,9 +1,14 @@
 """显式 cubic 的真实 GTM 气动表和后端一致性。"""
 
 import casadi as ca
-import fly_ruler_core as fr
 import numpy as np
 import pytest
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core import api as fr
+from fly_ruler_core.api.types import PyIrBuilder
+from fly_ruler_core.model.program import ModelProgram
+from fly_ruler_core.runtime.backend import NumpyArray
+from fly_ruler_core.runtime.instance import RuntimeInstance
 from pydantic import ValidationError
 
 from fr_gtm import GTMConfig, GTMSystem
@@ -49,8 +54,11 @@ def test_real_elevator_cubic_public_nested_ad_matches_independent_spline() -> No
         q >> table.q
         fr.export(loads=table.loads, gain=fr.jacobian(output=table.loads, wrt=table.q))
 
-    model = fr.Compiler(fr.CompilerSpec(cache_policy="off")).compile(
-        System.build("Root")
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(System.build("Root"), settings=ModelSettings()),
+            target=targets.casadi,
+        )
     )
     q = ca.SX.sym("q", 4)
     e = ca.SX.zeros(0, 1)
@@ -73,40 +81,61 @@ def test_real_elevator_cubic_public_nested_ad_matches_independent_spline() -> No
 
 
 @pytest.fixture(scope="module")
-def cubic_case() -> tuple[GTMConfig, fr.PyIrBuilder, fr.Compiler, fr.NumpyArray]:
+def cubic_case() -> tuple[GTMConfig, ModelProgram, NumpyArray]:
     """三种候选后端共用一次 NumPy 构图、编译和参考轨迹。"""
     cfg = GTMConfig.fullscale()
     cfg.aero.interpolation_method = "cubic"
     builder = GTMSystem.build("Root", cfg)
-    assert isinstance(builder, fr.PyIrBuilder)
-    compiler = fr.Compiler(
-        fr.CompilerSpec(cache_policy="off", integrator="rk4", dt=0.01)
+    assert isinstance(builder, PyIrBuilder)
+    program = compiler.prepare(
+        builder, settings=ModelSettings(integrator="rk4", dt=0.01)
     )
-    expected = simulate(compiler.compile(builder, target=fr.targets.numpy), cfg)
-    return cfg, builder, compiler, expected
+    expected = simulate(
+        runtime.bind(
+            compiler.compile(
+                program,
+                target=targets.numpy,
+            )
+        ),
+        cfg,
+    )
+    return cfg, program, expected
 
 
-@pytest.mark.parametrize("backend", ["casadi", "jax", "torch"])
+@pytest.mark.parametrize("backend", ["casadi", "jax"])
 def test_cubic_gtm_short_trajectory_matches_numpy(
     backend: str,
-    cubic_case: tuple[GTMConfig, fr.PyIrBuilder, fr.Compiler, fr.NumpyArray],
+    cubic_case: tuple[GTMConfig, ModelProgram, NumpyArray],
 ) -> None:
-    if backend in ("jax", "torch"):
+    if backend == "jax":
         pytest.importorskip(backend)
-    cfg, builder, compiler, expected = cubic_case
+    cfg, program, expected = cubic_case
     if backend == "casadi":
-        actual = simulate(compiler.compile(builder, target=fr.targets.casadi), cfg)
-    elif backend == "jax":
-        actual = simulate(compiler.compile(builder, target=fr.targets.jax), cfg)
-    else:
         actual = simulate(
-            compiler.compile(builder, target=fr.targets.TorchTarget(dtype="float64")),
+            runtime.bind(
+                compiler.compile(
+                    program,
+                    target=targets.casadi,
+                )
+            ),
             cfg,
         )
+    elif backend == "jax":
+        actual = simulate(
+            runtime.bind(
+                compiler.compile(
+                    program,
+                    target=targets.jax,
+                )
+            ),
+            cfg,
+        )
+    else:
+        raise AssertionError(backend)
     np.testing.assert_allclose(actual, expected, rtol=1e-9, atol=1e-9)
 
 
-def simulate[ArrayT](model: fr.CompiledModel[ArrayT], cfg: GTMConfig) -> fr.NumpyArray:
+def simulate[ArrayT](model: RuntimeInstance[ArrayT], cfg: GTMConfig) -> NumpyArray:
     x = model.x.build(
         {
             "Root.eom::pos_ned": [0.0, 0.0, -1000.0],

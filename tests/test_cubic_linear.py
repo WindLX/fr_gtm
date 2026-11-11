@@ -2,22 +2,37 @@
 
 from typing import Any
 
-import fly_ruler_core as fr
 import numpy as np
 import pytest
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core.runtime.instance import RuntimeInstance
 from pydantic import ValidationError
 
 from fr_gtm import GTMConfig, GTMSystem
 
 
-def _model(backend: str, cfg: GTMConfig) -> fr.CompiledModel[Any]:
-    compiler = fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.05))
+def _model(backend: str, cfg: GTMConfig) -> RuntimeInstance[Any]:
+    compiler_settings = ModelSettings(integrator="euler", dt=0.05)
     builder = GTMSystem.build("Root", cfg)
     if backend == "numpy":
-        return compiler.compile(builder, target=fr.targets.numpy)
+        return runtime.bind(
+            compiler.compile(
+                compiler.prepare(builder, settings=compiler_settings),
+                target=targets.numpy,
+            )
+        )
     if backend == "jax":
-        return compiler.compile(builder, target=fr.targets.jax)
-    return compiler.compile(builder, target=fr.targets.casadi)
+        return runtime.bind(
+            compiler.compile(
+                compiler.prepare(builder, settings=compiler_settings),
+                target=targets.jax,
+            )
+        )
+    return runtime.bind(
+        compiler.compile(
+            compiler.prepare(builder, settings=compiler_settings), target=targets.casadi
+        )
+    )
 
 
 @pytest.mark.parametrize("backend", ["numpy", "casadi", "jax"])

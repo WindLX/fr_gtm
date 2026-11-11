@@ -14,9 +14,10 @@ from pathlib import Path
 from types import FrameType
 from typing import TYPE_CHECKING, Annotated
 
-import fly_ruler_core as fr
 import numpy as np
 import typer
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core.runtime.instance import RuntimeInstance
 from fly_ruler_std.runtime.loop import LoopTask, SimulationContext, run_async_realtime
 from fly_ruler_std.runtime.record import Recorder
 
@@ -65,7 +66,7 @@ class Options:
     dry_run: bool
 
 
-async def _run[T](model: fr.CompiledModel[T], cfg: GTMConfig, args: Options) -> int:
+async def _run[T](model: RuntimeInstance[T], cfg: GTMConfig, args: Options) -> int:
     """运行已编译模型；硬件故障直接结束循环，并在 finally 中释放资源。"""
     paths = GTMPaths()
     lower = np.array([*cfg.actuator.position_lower, cfg.engine.lag.command_lower])
@@ -198,12 +199,12 @@ async def _run[T](model: fr.CompiledModel[T], cfg: GTMConfig, args: Options) -> 
                 recorder.record(
                     task_ctx.step,
                     task_ctx.time + task_ctx.dt,
-                    x=x,
-                    xd=xd,
-                    y=y,
-                    u=u,
-                    p=p,
-                    effect=effects,
+                    x=model.to_numpy(x),
+                    xd=model.to_numpy(xd),
+                    y=model.to_numpy(y),
+                    u=model.to_numpy(u),
+                    p=model.to_numpy(p),
+                    effect=model.to_numpy(effects),
                 )
 
         def status_task(task_ctx: SimulationContext) -> None:
@@ -274,20 +275,36 @@ async def main_async(args: Options) -> int:
         if args.duration <= 0:
             args.duration = 0.05
     cfg = GTMConfig.fullscale()
-    compiler = fr.Compiler(
-        fr.CompilerSpec(integrator=args.integrator, dt=1.0 / args.hz)
-    )
+    compiler_settings = ModelSettings(integrator=args.integrator, dt=1.0 / args.hz)
     builder = GTMSystem.build("Root", cfg)
     if args.backend == "numpy":
-        return await _run(compiler.compile(builder, target=fr.targets.numpy), cfg, args)
+        return await _run(
+            runtime.bind(
+                compiler.compile(
+                    compiler.prepare(builder, settings=compiler_settings),
+                    target=targets.numpy,
+                )
+            ),
+            cfg,
+            args,
+        )
     if args.backend == "casadi":
         return await _run(
-            compiler.compile(builder, target=fr.targets.casadi), cfg, args
+            runtime.bind(
+                compiler.compile(
+                    compiler.prepare(builder, settings=compiler_settings),
+                    target=targets.casadi,
+                )
+            ),
+            cfg,
+            args,
         )
     if args.backend == "native":
-        symbolic = compiler.compile(builder, target=fr.targets.casadi)
+        program = compiler.prepare(builder, settings=compiler_settings)
         return await _run(
-            compiler.convert(symbolic, target=fr.targets.NativeTarget()), cfg, args
+            runtime.bind(compiler.compile(program, target=targets.NativeTarget())),
+            cfg,
+            args,
         )
     raise ValueError("--backend must be native, numpy, or casadi")
 

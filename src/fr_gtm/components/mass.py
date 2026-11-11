@@ -1,6 +1,6 @@
 """GTM 质量与转动惯量不确定性 Block。"""
 
-import fly_ruler_core as fr
+from fly_ruler_core import api as fr
 
 from ..config import AircraftConfig
 

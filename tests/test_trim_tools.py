@@ -2,9 +2,9 @@
 
 from dataclasses import replace
 
-import fly_ruler_core as fr
 import numpy as np
 import pytest
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
 
 from fr_gtm import (
     GTMConfig,
@@ -39,8 +39,11 @@ def test_complete_flight_trim(
     cfg = GTMConfig.fullscale() if fullscale else GTMConfig.subscale()
     if second_order:
         cfg.engine = cfg.engine.model_copy(update={"lag": JetCatThrottleLagConfig()})
-    model = fr.Compiler(fr.CompilerSpec(cache_policy="off")).compile(
-        GTMSystem.build("Root", cfg), target=fr.targets.numpy
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(GTMSystem.build("Root", cfg), settings=ModelSettings()),
+            target=targets.numpy,
+        )
     )
     tas = 100.0 if fullscale else 40.0
     result = trim(model, cfg, altitude=1000.0, tas=tas, gamma=gamma, psi=psi, phi=phi)
@@ -72,8 +75,11 @@ def test_complete_flight_trim(
 
 def test_trim_uses_provided_parameters_guess_and_casadi_layout() -> None:
     cfg = GTMConfig.fullscale()
-    model = fr.Compiler(fr.CompilerSpec(cache_policy="off")).compile(
-        GTMSystem.build("Root", cfg), target=fr.targets.casadi
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(GTMSystem.build("Root", cfg), settings=ModelSettings()),
+            target=targets.casadi,
+        )
     )
     x, xd, u, p = init(
         model,

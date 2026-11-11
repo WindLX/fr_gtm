@@ -2,9 +2,11 @@
 
 from typing import assert_type
 
-import fly_ruler_core as fr
 import numpy as np
 import pytest
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core import api as fr
+from fly_ruler_core.runtime.instance import RuntimeInstance
 
 from fr_gtm import GTMConfig, Mode
 from fr_gtm.components.aero import Aero, AeroConfig
@@ -53,10 +55,10 @@ def test_standalone_aero_uses_its_own_geometry(backend: str) -> None:
             qbar=aero.qbar,
         )
 
-    compiler = fr.Compiler(fr.CompilerSpec(cache_policy="off"))
+    compiler_settings = ModelSettings()
     builder = AeroOnly.build("Root")
 
-    def verify[T](model: fr.CompiledModel[T]) -> None:
+    def verify[T](model: RuntimeInstance[T]) -> None:
         _, _, y, effects = model.continuous_fn(
             0.0, model.x.build(), model.xd.build(), model.u.build(), model.p.build()
         )
@@ -76,9 +78,23 @@ def test_standalone_aero_uses_its_own_geometry(backend: str) -> None:
         )
 
     if backend == "numpy":
-        verify(compiler.compile(builder, target=fr.targets.numpy))
+        verify(
+            runtime.bind(
+                compiler.compile(
+                    compiler.prepare(builder, settings=compiler_settings),
+                    target=targets.numpy,
+                )
+            )
+        )
     else:
-        verify(compiler.compile(builder, target=fr.targets.casadi))
+        verify(
+            runtime.bind(
+                compiler.compile(
+                    compiler.prepare(builder, settings=compiler_settings),
+                    target=targets.casadi,
+                )
+            )
+        )
 
 
 def test_asymmetric_control_arm_ratios_use_span_normalization() -> None:
@@ -113,8 +129,11 @@ def test_asymmetric_control_arm_ratios_use_span_normalization() -> None:
         block = Coefficients("coefficients")
         fr.export(coefficients=block.coefficients)
 
-    model = fr.Compiler(fr.CompilerSpec(cache_policy="off")).compile(
-        ElevatorMoment.build("Root"), target=fr.targets.numpy
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(ElevatorMoment.build("Root"), settings=ModelSettings()),
+            target=targets.numpy,
+        )
     )
     result = model.continuous_fn(
         0.0, model.x.build(), model.xd.build(), model.u.build(), model.p.build()

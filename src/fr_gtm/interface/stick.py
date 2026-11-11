@@ -3,8 +3,8 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-import fly_ruler_core as fr
 import numpy as np
+from fly_ruler_core.runtime.backend import NumpyArray
 from fly_stick import DeviceDescription
 
 from ..config import GTMConfig
@@ -75,7 +75,7 @@ def to_command(
     cfg: GTMConfig,
     *,
     config: StickConfig = _DEFAULT_CONFIG,
-) -> fr.NumpyArray:
+) -> NumpyArray:
     """读取必需操纵轴并映射为 [升降舵deg,副翼deg,方向舵deg,油门%]。
 
     Args:

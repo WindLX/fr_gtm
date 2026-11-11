@@ -22,7 +22,15 @@ import json
 from pathlib import Path
 from time import perf_counter
 
-import fly_ruler_core as fr
+from fly_ruler_core import (
+    ModelSettings,
+    OperationContext,
+    compiler,
+    runtime,
+    targets,
+)
+from fly_ruler_core.artifacts import ArtifactFile
+from fly_ruler_core.runtime.jax_config import JaxRuntimePolicy, configure_jax_runtime
 
 from fr_gtm import GTMConfig, GTMSystem, init
 
@@ -31,8 +39,8 @@ def main() -> None:
     """配置 JAX 运行时，编译模型并度量构建、跟踪、lower 与编译耗时。"""
     root = Path(__file__).resolve().parent.parent
     # 运行时策略要在导入 jax 之前设置，才能固定 CPU 平台并启用 64 位浮点。
-    fr.configure_jax_runtime(
-        fr.JaxRuntimePolicy(
+    configure_jax_runtime(
+        JaxRuntimePolicy(
             platforms=("cpu",),
             preallocate=False,
             enable_x64=True,
@@ -41,18 +49,25 @@ def main() -> None:
     import jax
     import jax.numpy as jnp
 
-    # cache_policy="rebuild" 强制重新生成，model_build_s 才表示真实的编译耗时。
+    # cache="refresh" 强制重新生成，model_build_s 才表示真实的编译耗时。
     cfg = GTMConfig.fullscale()
     builder = GTMSystem.build("Root", cfg)
     started = perf_counter()
-    model = fr.Compiler(
-        fr.CompilerSpec(
-            integrator="rk4",
-            dt=0.01,
-            artifact_dir=root / "build" / "flyruler",
-            cache_policy="rebuild",
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(
+                builder,
+                settings=ModelSettings(integrator="rk4", dt=0.01),
+                context=OperationContext(
+                    store=root / "build" / "flyruler", cache="refresh"
+                ),
+            ),
+            target=targets.jax,
+            context=OperationContext(
+                store=root / "build" / "flyruler", cache="refresh"
+            ),
         )
-    ).compile(builder, target=fr.targets.jax)
+    )
     model_build_s = perf_counter() - started
 
     # 四个运行向量统一转成 jnp 数组，作为跟踪与 lower 的位置参数。
@@ -89,7 +104,9 @@ def main() -> None:
     discrete_compile_s = perf_counter() - started
 
     # 生成源码文本用于统计规模；方程数为各函数的 jaxpr 等式条数。
-    source = model.inspect.sources["jax"]
+    source = model.artifact.file(ArtifactFile.BACKEND_SOURCE).read_text(
+        encoding="utf-8"
+    )
     result = {
         "model_build_s": model_build_s,
         "source_bytes": len(source.encode()),

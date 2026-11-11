@@ -2,9 +2,11 @@
 
 import math
 
-import fly_ruler_core as fr
 import numpy as np
 import pytest
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core import api as fr
+from fly_ruler_core.runtime.instance import RuntimeInstance
 
 from fr_gtm import GTMConfig, GTMPaths, GTMSystem, Mode, build_input, init
 from fr_gtm.interface.proto import VISUAL_MODEL_ID, EffectsTelemetry, to_aircraft_state
@@ -17,9 +19,9 @@ def test_truth_projection(backend: str, mode: Mode) -> None:
     cfg.sensor.alpha.bias = 15
     cfg.sensor.throttle.scale = 1.5
     builder = GTMSystem.build("Root", cfg)
-    compiler = fr.Compiler(fr.CompilerSpec())
+    compiler_settings = ModelSettings()
 
-    def verify[T](model: fr.CompiledModel[T]) -> None:
+    def verify[T](model: RuntimeInstance[T]) -> None:
         paths = GTMPaths()
         x, xd, _, p = init(
             model,
@@ -81,15 +83,32 @@ def test_truth_projection(backend: str, mode: Mode) -> None:
         )
 
     if backend == "numpy":
-        verify(compiler.compile(builder, target=fr.targets.numpy))
+        verify(
+            runtime.bind(
+                compiler.compile(
+                    compiler.prepare(builder, settings=compiler_settings),
+                    target=targets.numpy,
+                )
+            )
+        )
     else:
-        verify(compiler.compile(builder, target=fr.targets.casadi))
+        verify(
+            runtime.bind(
+                compiler.compile(
+                    compiler.prepare(builder, settings=compiler_settings),
+                    target=targets.casadi,
+                )
+            )
+        )
 
 
 def test_effects_schema_and_values() -> None:
     cfg = GTMConfig.subscale()
-    model = fr.Compiler(fr.CompilerSpec()).compile(
-        GTMSystem.build("Root", cfg), target=fr.targets.numpy
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(GTMSystem.build("Root", cfg), settings=ModelSettings()),
+            target=targets.numpy,
+        )
     )
     paths = GTMPaths()
     selection = (paths.effects.mass, paths.effects.aero_force, paths.effects.inertia)
@@ -138,10 +157,20 @@ def test_geodetic_projection_matches_std() -> None:
         origin = fr.input("origin", (3,))
         fr.export(lla=ned_position_to_geodetic(position, origin))
 
-    compiler = fr.Compiler(fr.CompilerSpec())
-    reference = compiler.compile(Geodetic.build("Root"), target=fr.targets.numpy)
+    compiler_settings = ModelSettings()
+    reference = runtime.bind(
+        compiler.compile(
+            compiler.prepare(Geodetic.build("Root"), settings=compiler_settings),
+            target=targets.numpy,
+        )
+    )
     cfg = GTMConfig.fullscale()
-    model = compiler.compile(GTMSystem.build("Root", cfg), target=fr.targets.numpy)
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(GTMSystem.build("Root", cfg), settings=compiler_settings),
+            target=targets.numpy,
+        )
+    )
     origin = (31.0, 121.0, 50.0)
     position = (100.0, 200.0, -1000.0)
     x, xd, u, p = init(model, cfg, position=position)

@@ -29,9 +29,7 @@ x, xd, u, p = initialize_jit(
 batch = jax.vmap(lambda v: initialize(airdata=v))(
     jnp.array([[3.0, 0.0, 100.0], [4.0, 1.0, 110.0]])
 )
-jacobian = jax.jacfwd(lambda v: initialize(airdata=v)[0])(
-    jnp.array([3.0, 0.0, 100.0])
-)
+jacobian = jax.jacfwd(lambda v: initialize(airdata=v)[0])(jnp.array([3.0, 0.0, 100.0]))
 ```
 
 配置和路径绑定在构造器上，原生调用接受后端数组或普通序列；输入形状与不确定度名称会检查，动态值由调用方保证有限、TAS 非负。正向与反向微分都保留姿态、来流、风和参数的计算依赖。`read_observation` 仍是主机读数工具，放在 JAX 变换之外。
@@ -51,7 +49,9 @@ u = jax.jit(lambda d, n: build_input(model, command, d=d, n=n))(d, n)
 from fr_gtm import GTMPaths
 
 paths = GTMPaths()
-values = {key: model.to_numpy(value) for key, value in model.x.read(x, by="path").items()}
+values = {
+    key: model.to_numpy(value) for key, value in model.x.read(x, by="path").items()
+}
 values[paths.x.pos_ned] = np.array([0.0, 0.0, -800.0])
 x = model.x.build(values)
 ```

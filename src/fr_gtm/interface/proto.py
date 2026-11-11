@@ -3,8 +3,8 @@
 import math
 from collections.abc import Sequence
 
-import fly_ruler_core as fr
 import numpy as np
+from fly_ruler_core.runtime.instance import RuntimeInstance
 from fly_ruler_proto_python import (
     AircraftState,
     Attitude,
@@ -26,7 +26,7 @@ VISUAL_MODEL_ID = "boeing_737_800"
 
 
 def to_aircraft_state[T](
-    model: fr.CompiledModel[T],
+    model: RuntimeInstance[T],
     cfg: GTMConfig,
     *,
     x: T,
@@ -142,7 +142,7 @@ class EffectsTelemetry[T]:
 
     def __init__(
         self,
-        model: fr.CompiledModel[T],
+        model: RuntimeInstance[T],
         *,
         paths: Sequence[str],
         stream_id: str = "gtm.effects",

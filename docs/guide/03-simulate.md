@@ -96,10 +96,10 @@ force_aero = effects[paths.effects.aero_force]
 
 ## 这一章用到的 API
 
-- [`fly_ruler_core.CompiledModel`](/api/core/runtime/index)：`discrete_fn` 与 `continuous_fn` 的签名
+- [`fly_ruler_core.runtime.instance.RuntimeInstance`](/api/core/runtime/index)：`discrete_fn` 与 `continuous_fn` 的签名
 - [`fly_ruler_std.runtime.record.Recorder`](/api/std/runtime/record/index)：记录与落盘
 - [`fly_ruler_std.runtime.record.Loader`](/api/std/runtime/record/index)：按列名回读
-- [`fly_ruler_core` 输出与变量视图](/api/core/index#variableview)：`model.y.read(y, by="path")` 的路径语义
+- [`fly_ruler_core.runtime.variable.VariableView`](/api/core/runtime/index#variableview)：`model.y.read(y, by="path")` 的路径语义
 
 ## 边界与常见坑
 
@@ -151,12 +151,19 @@ telemetry = EffectsTelemetry(
 with FlyRulerClient(address, name, telemetry_schemas=(telemetry.schema,)) as client:
     result = model.continuous_fn(t, x, xd, u, p)
     state = to_aircraft_state(
-        model, cfg, x=x, y=result.y, effects=result.effects,
-        origin=(31.1434, 121.8052, 0.0), paths=paths,
+        model,
+        cfg,
+        x=x,
+        y=result.y,
+        effects=result.effects,
+        origin=(31.1434, 121.8052, 0.0),
+        paths=paths,
     )
     client.update_state(state, timestamp=timestamp)
     client.publish_telemetry(
-        telemetry.stream_id, telemetry.values(result.effects), timestamp=timestamp,
+        telemetry.stream_id,
+        telemetry.values(result.effects),
+        timestamp=timestamp,
     )
 ```
 

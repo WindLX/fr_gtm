@@ -1,11 +1,14 @@
 from collections.abc import Mapping
 from typing import Any, cast
 
-import fly_ruler_core as fr
 import numpy as np
 import pytest
-from fly_ruler_core import VariableInfo
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core import api as fr
 from fly_ruler_core._core import PyCompiler
+from fly_ruler_core.api.types import PyIrBuilder
+from fly_ruler_core.model.description import VariableInfo
+from fly_ruler_core.runtime.instance import RuntimeInstance
 from ground_helpers import ground_state
 
 from fr_gtm import (
@@ -18,28 +21,33 @@ from fr_gtm.components.engine import Engine
 from fr_gtm.components.mass import Mass
 
 
-def _compile(cfg: GTMConfig) -> fr.CompiledModel[Any]:
+def _compile(cfg: GTMConfig) -> RuntimeInstance[Any]:
     builder = GTMSystem.build("Root", cfg)
-    assert isinstance(builder, fr.PyIrBuilder)
-    return fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
-        builder, target=fr.targets.numpy
+    assert isinstance(builder, PyIrBuilder)
+    return runtime.bind(
+        compiler.compile(
+            compiler.prepare(
+                builder, settings=ModelSettings(integrator="euler", dt=0.01)
+            ),
+            target=targets.numpy,
+        )
     )
 
 
 @pytest.fixture(scope="module")
-def default_model() -> fr.CompiledModel[Any]:
+def default_model() -> RuntimeInstance[Any]:
     """共享编译结果；每个测试仍独立构建状态、输入和运行参数。"""
     return _compile(GTMConfig.fullscale())
 
 
 @pytest.fixture(scope="module")
-def ground_model() -> fr.CompiledModel[Any]:
+def ground_model() -> RuntimeInstance[Any]:
     return _compile(GTMConfig.fullscale(enable_ground=True))
 
 
 def test_topology_contains_semantic_physical_blocks() -> None:
     builder = GTMSystem.build("Root", GTMConfig.fullscale())
-    assert isinstance(builder, fr.PyIrBuilder)
+    assert isinstance(builder, PyIrBuilder)
     blocks = set(builder._artifact_schema(include_exprs=False)["blocks"])
     assert {
         "Root.actuator",
@@ -78,7 +86,7 @@ def test_clean_observation_has_no_instantaneous_command_dependency() -> None:
         PyCompiler.compile_from_builder(builder)
 
 
-def test_layout_and_full_paths(default_model: fr.CompiledModel[Any]) -> None:
+def test_layout_and_full_paths(default_model: RuntimeInstance[Any]) -> None:
     model = default_model
     assert model.n_x == 25
     assert model.n_xdot == 24
@@ -117,7 +125,7 @@ def test_layout_and_full_paths(default_model: fr.CompiledModel[Any]) -> None:
 
 
 def test_initial_state_and_outputs_are_finite(
-    default_model: fr.CompiledModel[Any],
+    default_model: RuntimeInstance[Any],
 ) -> None:
     model = default_model
     x = init(
@@ -146,7 +154,7 @@ def test_initial_state_and_outputs_are_finite(
 
 
 def test_command_telemetry_is_excluded_from_feedback(
-    default_model: fr.CompiledModel[Any],
+    default_model: RuntimeInstance[Any],
 ) -> None:
     """控制器反馈不得对根指令存在直接前馈。"""
 
@@ -176,7 +184,7 @@ def test_command_telemetry_is_excluded_from_feedback(
 
 
 def test_short_integration_preserves_quaternion_norm(
-    default_model: fr.CompiledModel[Any],
+    default_model: RuntimeInstance[Any],
 ) -> None:
     model = default_model
     x0 = init(
@@ -207,7 +215,7 @@ def test_short_integration_preserves_quaternion_norm(
 
 
 def test_wind_direction_runtime_parameter_is_radians(
-    default_model: fr.CompiledModel[Any],
+    default_model: RuntimeInstance[Any],
 ) -> None:
     model = default_model
     x = init(
@@ -234,7 +242,7 @@ def test_wind_direction_runtime_parameter_is_radians(
 @pytest.mark.parametrize("is_fullscale", [False, True])
 def test_optional_ground_contact_layout_and_static_support(
     is_fullscale: bool,
-    ground_model: fr.CompiledModel[Any],
+    ground_model: RuntimeInstance[Any],
 ) -> None:
     cfg = (GTMConfig.fullscale if is_fullscale else GTMConfig.subscale)(
         enable_ground=True
@@ -294,7 +302,7 @@ def test_optional_ground_contact_layout_and_static_support(
 
 
 def test_ground_touchdown_short_trajectory_is_finite(
-    ground_model: fr.CompiledModel[Any],
+    ground_model: RuntimeInstance[Any],
 ) -> None:
     cfg = GTMConfig.fullscale(enable_ground=True)
     model = ground_model
@@ -339,8 +347,13 @@ def _mass_block_outputs(cfg: GTMConfig) -> Mapping[str, Any]:
         fr.export(mass_value=mass.mass, weight_value=mass.weight)
 
     builder = MassOnly.build("MassOnly")
-    model = fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
-        builder, target=fr.targets.numpy
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(
+                builder, settings=ModelSettings(integrator="euler", dt=0.01)
+            ),
+            target=targets.numpy,
+        )
     )
     _, _, y, effects = model.continuous_fn(
         0.0, model.x.build(), model.xd.build(), model.u.build(), model.p.build()
@@ -384,8 +397,13 @@ def _engine_block_moment(cfg: GTMConfig) -> np.ndarray:
         )
 
     builder = EngineOnly.build("EngineOnly")
-    model = fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
-        builder, target=fr.targets.numpy
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(
+                builder, settings=ModelSettings(integrator="euler", dt=0.01)
+            ),
+            target=targets.numpy,
+        )
     )
     u = model.u.build(
         {
@@ -449,7 +467,7 @@ def test_original_engine_layout_and_initialization() -> None:
 
 
 def test_flight_path_uses_ned_velocity_and_degrees(
-    default_model: fr.CompiledModel[Any],
+    default_model: RuntimeInstance[Any],
 ) -> None:
     """机头上仰且机体速度沿x轴时，航迹角应随NED爬升速度变化，而不是恒为零。"""
     model = default_model

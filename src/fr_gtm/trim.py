@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import fly_ruler_core as fr
 import numpy as np
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core import api as fr
+from fly_ruler_core.model.description import VariableInfo
+from fly_ruler_core.runtime.backend import NumpyArray
+from fly_ruler_core.runtime.instance import RuntimeInstance
 from fly_ruler_std.runtime.trim import TrimResult, TrimSolver, TrimSpec
 
 from .config import GTMConfig
@@ -15,8 +19,8 @@ from .system import GTMSystem
 
 _ROOT = GTMPaths()
 _PLANT = GTMPaths("Root.aircraft")
-type _Values = dict[str | fr.VariableInfo, fr.NumpyArray]
-type _TrimValues = dict[str, fr.NumpyArray]
+type _Values = dict[str | VariableInfo, NumpyArray]
+type _TrimValues = dict[str, NumpyArray]
 
 
 @fr.block
@@ -75,7 +79,7 @@ class GTMTrimResult[T]:
 
 
 def trim[T](
-    model: fr.CompiledModel[T],
+    model: RuntimeInstance[T],
     cfg: GTMConfig,
     *,
     altitude: float,
@@ -110,13 +114,16 @@ def trim[T](
         ValueError: 目标包含非有限值或 TAS 不大于零。
 
     Note:
-        内部用 CasADi 编译小型条件包装，复用 Compiler 默认产物缓存；不缓存配平答案。
+        内部用 CasADi 编译小型条件包装；编译使用临时工作区，不缓存配平答案。
         p/q/r 固定零，平动/转动加速度与内部状态导数为零，位置导数自由。
         gamma 非零时为给定高度处的局部爬升配平，不表示高度/大气永远不变；
         非零 phi 不自动引入协调转弯。输入扰动 d/n 固定零，风/不确定度由 p 提供。
     """
-    targets = {"tas": tas, "gamma": gamma, "psi": psi, "phi": phi}
-    finite = [altitude, *(value for value in targets.values() if value is not None)]
+    flight_targets = {"tas": tas, "gamma": gamma, "psi": psi, "phi": phi}
+    finite = [
+        altitude,
+        *(value for value in flight_targets.values() if value is not None),
+    ]
     if not np.isfinite(finite).all() or tas <= 0.0:
         raise ValueError("trim targets must be finite and TAS must be positive")
     parameters = model.p.default() if p is None else p
@@ -139,8 +146,11 @@ def trim[T](
         )
     else:
         x0, _, u0 = guess
-    wrapped = fr.Compiler(fr.CompilerSpec()).compile(
-        _TrimSystem.build("Root", cfg), target=fr.targets.casadi
+    wrapped = runtime.bind(
+        compiler.compile(
+            compiler.prepare(_TrimSystem.build("Root", cfg), settings=ModelSettings()),
+            target=targets.casadi,
+        )
     )
     # 两套模型用显式路径映射，绝不把包装模型的向量下标当作生产布局。
     wrapped_parameters: _TrimValues = {}
@@ -189,7 +199,7 @@ def trim[T](
             },
             output_value={
                 f"Root::{name}": value
-                for name, value in targets.items()
+                for name, value in flight_targets.items()
                 if value is not None
             },
             initial_guess=initial_guess,
@@ -218,7 +228,7 @@ def trim[T](
         actual = paths.root + key.removeprefix(_PLANT.root)
         residuals[actual] = float(np.max(np.abs(model.to_numpy(rates[actual]))))
     conditions = wrapped.y.read(solved.y_opt, by="path")
-    for name, target in targets.items():
+    for name, target in flight_targets.items():
         if target is not None:
             residuals[name] = abs(
                 float(wrapped.to_numpy(conditions[f"Root::{name}"]).item()) - target

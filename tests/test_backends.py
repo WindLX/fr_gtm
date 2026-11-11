@@ -3,9 +3,11 @@ from pathlib import Path
 from typing import Any
 
 import casadi as ca
-import fly_ruler_core as fr
 import numpy as np
 import pytest
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core.api.types import PyIrBuilder
+from fly_ruler_core.model.program import ModelProgram
 from ground_helpers import ground_state
 
 from fr_gtm import GTMConfig, GTMSystem
@@ -20,9 +22,9 @@ TRAJECTORY_BACKENDS = ("numpy", "casadi", "native", "jax")
 LAG = GTMConfig.fullscale().engine.lag
 
 
-def _builder(*, enable_ground: bool = False) -> fr.PyIrBuilder:
+def _builder(*, enable_ground: bool = False) -> PyIrBuilder:
     builder = GTMSystem.build("Root", GTMConfig.fullscale(enable_ground=enable_ground))
-    if not isinstance(builder, fr.PyIrBuilder):
+    if not isinstance(builder, PyIrBuilder):
         raise TypeError("expected top-level GTM builder")
     return builder
 
@@ -90,31 +92,27 @@ def _inputs(model: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 
 @lru_cache(maxsize=None)
+def _program(*, enable_ground: bool = False) -> ModelProgram:
+    return compiler.prepare(
+        _builder(enable_ground=enable_ground),
+        settings=ModelSettings(integrator="rk4", dt=float(BACKEND_REFERENCE["dt"])),
+    )
+
+
+@lru_cache(maxsize=None)
 def _compiled_backend(name: str, *, enable_ground: bool = False) -> Any:
-    dt = float(BACKEND_REFERENCE["dt"])
+    program = _program(enable_ground=enable_ground)
     if name == "jax":
         pytest.importorskip("jax")
-        return fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=dt)).compile(
-            _builder(enable_ground=enable_ground), target=fr.targets.jax
-        )
-    if name == "native":
-        # lru_cache 区分省略参数与显式 False；复用与现有调用一致的键。
-        casadi_model = (
-            _compiled_backend("casadi", enable_ground=True)
-            if enable_ground
-            else _compiled_backend("casadi")
-        )
-        return fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=dt)).convert(
-            casadi_model, target=fr.targets.NativeTarget()
-        )
-
-    compiler = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=dt))
-    builder = _builder(enable_ground=enable_ground)
-    if name == "numpy":
-        return compiler.compile(builder, target=fr.targets.numpy)
-    if name == "casadi":
-        return compiler.compile(builder, target=fr.targets.casadi)
-    raise ValueError(f"unsupported backend: {name}")
+        return runtime.bind(compiler.compile(program, target=targets.jax))
+    elif name == "native":
+        return runtime.bind(compiler.compile(program, target=targets.NativeTarget()))
+    elif name == "numpy":
+        return runtime.bind(compiler.compile(program, target=targets.numpy))
+    elif name == "casadi":
+        return runtime.bind(compiler.compile(program, target=targets.casadi))
+    else:
+        raise ValueError(f"unsupported backend: {name}")
 
 
 @lru_cache(maxsize=None)
@@ -178,11 +176,21 @@ def _evaluate_backend(
 
 
 def test_casadi_matches_numpy() -> None:
-    numpy_model = fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
-        _builder(), target=fr.targets.numpy
+    numpy_model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(
+                _builder(), settings=ModelSettings(integrator="euler", dt=0.01)
+            ),
+            target=targets.numpy,
+        )
     )
-    casadi_model = fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
-        _builder(), target=fr.targets.casadi
+    casadi_model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(
+                _builder(), settings=ModelSettings(integrator="euler", dt=0.01)
+            ),
+            target=targets.casadi,
+        )
     )
 
     x = numpy_model.x.build(

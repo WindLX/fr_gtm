@@ -1,8 +1,10 @@
 """一阶发动机的配置选择、解析响应与公开步进合同。"""
 
-import fly_ruler_core as fr
 import numpy as np
 import pytest
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core import api as fr
+from fly_ruler_core.runtime.instance import RuntimeInstance
 
 from fr_gtm import FirstOrderThrottleLagConfig, GTMConfig, JetCatThrottleLagConfig
 from fr_gtm.components.engine import Engine
@@ -40,7 +42,7 @@ def test_invalid_limits() -> None:
         FirstOrderThrottleLagConfig(command_lower=100.0, command_upper=50.0)
 
 
-@pytest.mark.parametrize("backend", ["numpy", "casadi", "native", "jax", "torch"])
+@pytest.mark.parametrize("backend", ["numpy", "casadi", "native", "jax"])
 @pytest.mark.parametrize("tau", [1.5, 3.0])
 def test_first_order_analytic_response(backend: str, tau: float) -> None:
     cfg = GTMConfig.fullscale()
@@ -58,10 +60,10 @@ def test_first_order_analytic_response(backend: str, tau: float) -> None:
         fr.math.vector([0.0]) >> engine.qbar
         fr.export(throttle=engine.effective_throttle, force=engine.force)
 
-    compiler = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=0.01))
+    compiler_settings = ModelSettings(integrator="rk4", dt=0.01)
     builder = EngineOnly.build("Root")
 
-    def verify[T](model: fr.CompiledModel[T]) -> None:
+    def verify[T](model: RuntimeInstance[T]) -> None:
         assert model.n_x == 1
         xd, p = model.xd.build(), model.p.build()
         for command in (-50.0, 80.0, 150.0, 20.0):
@@ -94,19 +96,40 @@ def test_first_order_analytic_response(backend: str, tau: float) -> None:
 
     match backend:
         case "numpy":
-            verify(compiler.compile(builder, target=fr.targets.numpy))
+            verify(
+                runtime.bind(
+                    compiler.compile(
+                        compiler.prepare(builder, settings=compiler_settings),
+                        target=targets.numpy,
+                    )
+                )
+            )
         case "casadi":
-            verify(compiler.compile(builder))
+            verify(
+                runtime.bind(
+                    compiler.compile(
+                        compiler.prepare(builder, settings=compiler_settings),
+                        target=targets.casadi,
+                    )
+                )
+            )
         case "native":
-            verify(compiler.compile(builder, target=fr.targets.NativeTarget()))
+            verify(
+                runtime.bind(
+                    compiler.compile(
+                        compiler.prepare(builder, settings=compiler_settings),
+                        target=targets.NativeTarget(),
+                    )
+                )
+            )
         case "jax":
             pytest.importorskip("jax")
-            verify(compiler.compile(builder, target=fr.targets.jax))
-        case "torch":
-            pytest.importorskip("torch")
             verify(
-                compiler.compile(
-                    builder, target=fr.targets.TorchTarget(dtype="float64")
+                runtime.bind(
+                    compiler.compile(
+                        compiler.prepare(builder, settings=compiler_settings),
+                        target=targets.jax,
+                    )
                 )
             )
         case _:

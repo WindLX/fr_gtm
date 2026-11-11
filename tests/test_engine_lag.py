@@ -21,9 +21,10 @@ import math
 from functools import lru_cache
 from typing import Any
 
-import fly_ruler_core as fr
 import numpy as np
 import pytest
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core import api as fr
 
 from fr_gtm import GTMConfig, JetCatThrottleLagConfig
 from fr_gtm.components.engine import Engine
@@ -63,8 +64,11 @@ def _engine_only(time_scale: float) -> tuple[GTMConfig, Any]:
         fr.export(effective_throttle=engine.effective_throttle, force=engine.force)
 
     builder = EngineOnly.build("EngineOnly")
-    model = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=_DT)).compile(
-        builder, target=fr.targets.numpy
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(builder, settings=ModelSettings(integrator="rk4", dt=_DT)),
+            target=targets.numpy,
+        )
     )
     return cfg, model
 

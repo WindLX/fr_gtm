@@ -4,9 +4,12 @@ import math
 from collections.abc import Callable
 
 import casadi as ca
-import fly_ruler_core as fr
 import numpy as np
 import pytest
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core import api as fr
+from fly_ruler_core.api.types import PyIrBuilder
+from fly_ruler_core.runtime.instance import RuntimeInstance
 
 from fr_gtm.components.aero import _hykal
 
@@ -45,7 +48,7 @@ def _nasa_hykal(query: np.ndarray, trig: np.ndarray) -> np.ndarray:
     )
 
 
-def _builder() -> fr.PyIrBuilder:
+def _builder() -> PyIrBuilder:
     @fr.system
     def Rates() -> None:
         @fr.block
@@ -81,7 +84,7 @@ def _builder() -> fr.PyIrBuilder:
 
 
 def _model_evaluator[T](
-    model: fr.CompiledModel[T],
+    model: RuntimeInstance[T],
 ) -> Callable[[np.ndarray], np.ndarray]:
     def run(values: np.ndarray) -> np.ndarray:
         result = model.continuous_fn(
@@ -98,17 +101,38 @@ def _model_evaluator[T](
 
 @pytest.fixture(params=["numpy", "casadi_sx", "casadi_mx", "native", "jax"])
 def evaluate(request: pytest.FixtureRequest) -> Callable[[np.ndarray], np.ndarray]:
-    compiler = fr.Compiler(fr.CompilerSpec(cache_policy="off"))
+    compiler_settings = ModelSettings()
     backend = request.param
     if backend == "jax":
         pytest.importorskip("jax")
-        return _model_evaluator(compiler.compile(_builder(), target=fr.targets.jax))
+        return _model_evaluator(
+            runtime.bind(
+                compiler.compile(
+                    compiler.prepare(_builder(), settings=compiler_settings),
+                    target=targets.jax,
+                )
+            )
+        )
     if backend == "numpy":
-        return _model_evaluator(compiler.compile(_builder(), target=fr.targets.numpy))
-    symbolic = compiler.compile(_builder(), target=fr.targets.casadi)
+        return _model_evaluator(
+            runtime.bind(
+                compiler.compile(
+                    compiler.prepare(_builder(), settings=compiler_settings),
+                    target=targets.numpy,
+                )
+            )
+        )
+    symbolic = runtime.bind(
+        compiler.compile(
+            compiler.prepare(_builder(), settings=compiler_settings),
+            target=targets.casadi,
+        )
+    )
     if backend == "native":
         return _model_evaluator(
-            compiler.convert(symbolic, target=fr.targets.NativeTarget())
+            runtime.bind(
+                compiler.compile(symbolic.program, target=targets.NativeTarget())
+            )
         )
     if backend == "casadi_sx":
         sx_query = ca.SX.sym("query", 5)
@@ -196,8 +220,11 @@ def test_hykal_keeps_nonzero_direction_denominators(
 
 
 def test_symbolic_zero_denominator_has_finite_values_and_jacobian() -> None:
-    model = fr.Compiler(fr.CompilerSpec(cache_policy="off")).compile(
-        _builder(), target=fr.targets.casadi
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(_builder(), settings=ModelSettings()),
+            target=targets.casadi,
+        )
     )
     query = ca.SX.sym("query", 5)
     result = model.sx.continuous_fn(

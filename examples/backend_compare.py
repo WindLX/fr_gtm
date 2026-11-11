@@ -20,8 +20,10 @@ from importlib.util import find_spec
 from pathlib import Path
 from time import perf_counter
 
-import fly_ruler_core as fr
 import numpy as np
+from fly_ruler_core import ModelSettings, OperationContext, compiler, runtime, targets
+from fly_ruler_core.runtime.instance import RuntimeInstance
+from fly_ruler_core.runtime.jax_config import JaxRuntimePolicy, configure_jax_runtime
 
 from fr_gtm import GTMConfig, GTMSystem, init
 
@@ -29,7 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _evaluate[T](
-    model: fr.CompiledModel[T], cfg: GTMConfig
+    model: RuntimeInstance[T], cfg: GTMConfig
 ) -> tuple[np.ndarray, np.ndarray]:
     """用同一组物理初值装配各后端，返回主机 xdot/y 向量。"""
     x, xd, u, p = init(
@@ -53,8 +55,8 @@ def main() -> None:
     # #region 05-analysis-1
     # 先按实际安装情况确定后端清单；JAX 需先配置运行时策略才能启用 CPU 与 64 位。
     if find_spec("jax") is not None:
-        fr.configure_jax_runtime(
-            fr.JaxRuntimePolicy(
+        configure_jax_runtime(
+            JaxRuntimePolicy(
                 platforms=("cpu",),
                 preallocate=False,
                 enable_x64=True,
@@ -70,22 +72,47 @@ def main() -> None:
     results: dict[str, tuple[float, np.ndarray, np.ndarray]] = {}
     for name in names:
         started = perf_counter()
-        compiler = fr.Compiler(
-            fr.CompilerSpec(
-                integrator="euler", dt=0.01, artifact_dir=ROOT / "build" / "flyruler"
-            )
-        )
+        compiler_settings = ModelSettings(integrator="euler", dt=0.01)
+        compiler_context = OperationContext(store=ROOT / "build" / "flyruler")
         cfg = GTMConfig.fullscale()
         builder = GTMSystem.build("Root", cfg)
+        program = compiler.prepare(
+            builder, settings=compiler_settings, context=compiler_context
+        )
         # 走到最后的分支时 name 只能是 jax，因为清单由上面的可用性检查生成。
         if name == "numpy":
-            xdot, y = _evaluate(compiler.compile(builder, target=fr.targets.numpy), cfg)
+            xdot, y = _evaluate(
+                runtime.bind(
+                    compiler.compile(
+                        program,
+                        target=targets.numpy,
+                        context=compiler_context,
+                    )
+                ),
+                cfg,
+            )
         elif name == "casadi":
             xdot, y = _evaluate(
-                compiler.compile(builder, target=fr.targets.casadi), cfg
+                runtime.bind(
+                    compiler.compile(
+                        program,
+                        target=targets.casadi,
+                        context=compiler_context,
+                    )
+                ),
+                cfg,
             )
         else:
-            xdot, y = _evaluate(compiler.compile(builder, target=fr.targets.jax), cfg)
+            xdot, y = _evaluate(
+                runtime.bind(
+                    compiler.compile(
+                        program,
+                        target=targets.jax,
+                        context=compiler_context,
+                    )
+                ),
+                cfg,
+            )
         compile_ms = (perf_counter() - started) * 1000.0
         results[name] = (
             compile_ms,

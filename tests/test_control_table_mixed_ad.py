@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import casadi as ca
-import fly_ruler_core as fr
 import numpy as np
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core import api as fr
+from fly_ruler_core.api.types import PyIrBuilder, Signal
+from fly_ruler_core.runtime.backend import NumpyArray
 
 from fr_gtm import GTMConfig
 
 
-def _definition(grids: list[fr.NumpyArray], values: fr.NumpyArray) -> fr.PyIrBuilder:
+def _definition(grids: list[NumpyArray], values: NumpyArray) -> PyIrBuilder:
     @fr.block
     def Loads() -> None:
         aero = fr.input("aero", len(grids) - 1)
@@ -22,7 +25,7 @@ def _definition(grids: list[fr.NumpyArray], values: fr.NumpyArray) -> fr.PyIrBui
         feedback = fr.input("feedback", 3)
         loads = Loads("loads")
         # Fixed pitch, changing flight path angle: alpha = theta - gamma.
-        coords: list[fr.Signal | float] = [
+        coords: list[Signal | float] = [
             fr.math.degrees(0.11 - feedback[0]),
             fr.math.degrees(feedback[1]),
         ]
@@ -58,8 +61,11 @@ def test_real_control_tables_mixed_ad_matches_cell_local_difference() -> None:
         ),
     ]
     for grids, values in tables:
-        model = fr.Compiler(fr.CompilerSpec(cache_policy="off")).compile(
-            _definition(grids, values)
+        model = runtime.bind(
+            compiler.compile(
+                compiler.prepare(_definition(grids, values), settings=ModelSettings()),
+                target=targets.casadi,
+            )
         )
         feedback = ca.MX.sym("feedback", 3)
         result = model.mx.continuous_fn(

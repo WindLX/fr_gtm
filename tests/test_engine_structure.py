@@ -2,9 +2,11 @@
 
 from typing import assert_type
 
-import fly_ruler_core as fr
 import numpy as np
 import pytest
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core import api as fr
+from fly_ruler_core.runtime.instance import RuntimeInstance
 
 from fr_gtm import GTMConfig
 from fr_gtm.components.engine import (
@@ -101,10 +103,10 @@ def test_standalone_loads_follow_original_formula(backend: str) -> None:
         qbar >> loads.qbar
         fr.export(force=loads.force, moment=loads.moment)
 
-    compiler = fr.Compiler(fr.CompilerSpec(cache_policy="off"))
+    compiler_settings = ModelSettings()
     builder = LoadsOnly.build("Root")
 
-    def verify[ArrayT](model: fr.CompiledModel[ArrayT]) -> None:
+    def verify[ArrayT](model: RuntimeInstance[ArrayT]) -> None:
         assert model.n_x == 0
         omega = np.array([0.2, -0.1, 0.3])
         for throttle, pressure, qbar in [
@@ -172,9 +174,23 @@ def test_standalone_loads_follow_original_formula(backend: str) -> None:
             )
 
     if backend == "numpy":
-        verify(compiler.compile(builder, target=fr.targets.numpy))
+        verify(
+            runtime.bind(
+                compiler.compile(
+                    compiler.prepare(builder, settings=compiler_settings),
+                    target=targets.numpy,
+                )
+            )
+        )
     else:
-        verify(compiler.compile(builder, target=fr.targets.casadi))
+        verify(
+            runtime.bind(
+                compiler.compile(
+                    compiler.prepare(builder, settings=compiler_settings),
+                    target=targets.casadi,
+                )
+            )
+        )
 
 
 def test_old_flat_load_overrides_are_not_silently_ignored() -> None:
@@ -207,10 +223,10 @@ def test_jetcat_matrix_operations_match_state_space(backend: str) -> None:
         command >> lag.throttle_command
         fr.export(throttle=lag.effective_throttle)
 
-    compiler = fr.Compiler(fr.CompilerSpec(cache_policy="off"))
+    compiler_settings = ModelSettings()
     builder = LagOnly.build("Root")
 
-    def verify[T](model: fr.CompiledModel[T]) -> None:
+    def verify[T](model: RuntimeInstance[T]) -> None:
         A = np.asarray(cfg.state_matrix).reshape(2, 2)
         B = np.asarray(cfg.input_matrix)
         C = np.asarray(cfg.output_matrix)
@@ -234,13 +250,41 @@ def test_jetcat_matrix_operations_match_state_space(backend: str) -> None:
 
     match backend:
         case "numpy":
-            verify(compiler.compile(builder, target=fr.targets.numpy))
+            verify(
+                runtime.bind(
+                    compiler.compile(
+                        compiler.prepare(builder, settings=compiler_settings),
+                        target=targets.numpy,
+                    )
+                )
+            )
         case "casadi":
-            verify(compiler.compile(builder, target=fr.targets.casadi))
+            verify(
+                runtime.bind(
+                    compiler.compile(
+                        compiler.prepare(builder, settings=compiler_settings),
+                        target=targets.casadi,
+                    )
+                )
+            )
         case "native":
-            verify(compiler.compile(builder, target=fr.targets.NativeTarget()))
+            verify(
+                runtime.bind(
+                    compiler.compile(
+                        compiler.prepare(builder, settings=compiler_settings),
+                        target=targets.NativeTarget(),
+                    )
+                )
+            )
         case "jax":
             pytest.importorskip("jax")
-            verify(compiler.compile(builder, target=fr.targets.jax))
+            verify(
+                runtime.bind(
+                    compiler.compile(
+                        compiler.prepare(builder, settings=compiler_settings),
+                        target=targets.jax,
+                    )
+                )
+            )
         case _:
             raise AssertionError(backend)

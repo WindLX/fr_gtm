@@ -8,7 +8,7 @@ GTM 把配置与系统分开构造：`GTMConfig` 负责按尺度与构型派生�
 
 <<< @/../models/fr_gtm/examples/simulate.py#01-build-1
 
-`GTMConfig.fullscale()` 生成全尺寸、光洁构型的配置，省略 `target` 时使用 CasADi 后端，`integrator="rk4"` 与 `dt=0.01` 是编译期设置。这段代码在 `just example-simulate` 里接着推进 100 步。
+`GTMConfig.fullscale()` 生成全尺寸、光洁构型的配置，示例显式选择 CasADi 后端，`integrator="rk4"` 与 `dt=0.01` 是编译期设置。这段代码在 `just example-simulate` 里接着推进 100 步。
 
 ## 选择发动机响应
 
@@ -110,7 +110,7 @@ cfg.aero.control_arm_ratios = (-0.07, -0.03, 0.03, 0.07)
 - [`fr_gtm.GTMSystem`](/api/gtm/system)：根系统的装配与 `fr.export` 的输出面
 - [`fr_gtm.Mode`](/api/gtm/components/aero)：襟翼与起落架构型的四个取值
 - [`fr_gtm.layout`](/api/gtm/layout)：路径目录与控制、扰动、观测通道索引
-- [`fly_ruler_core.Compiler`](/api/core/compiler/index)：编译选项与目标后端
+- [`fly_ruler_core.compiler`](/api/core/compiler/index)：编译选项与目标后端
 
 ## 边界与常见坑
 

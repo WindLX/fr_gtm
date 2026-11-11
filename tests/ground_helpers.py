@@ -1,14 +1,14 @@
 """地面测试通过公共 init 与 std 静态接触姿态组合构造场景。"""
 
-import fly_ruler_core as fr
 import numpy as np
+from fly_ruler_core.runtime.instance import RuntimeInstance
 from fly_ruler_std.blocks.physics import solve_static_ground_pose
 
 from fr_gtm import GTMConfig, init
 
 
 def ground_state[T](
-    model: fr.CompiledModel[T],
+    model: RuntimeInstance[T],
     cfg: GTMConfig,
     *,
     forward_speed_mps: float = 0.0,

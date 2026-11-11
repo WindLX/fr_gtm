@@ -7,18 +7,21 @@ GTM 的扰动分三类：环境侧有稳态风与 Dryden 紊流，模型侧有�
 默认构型没有起落架。打开它要在构造配置时就传参，然后重新编译：
 
 ```python
+from fly_ruler_core import runtime
+
 cfg = GTMConfig.fullscale(enable_ground=True)
 builder = GTMSystem.build("Root", cfg)
-model = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=dt)).compile(
-    builder
-)
+from fly_ruler_core import ModelSettings, artifacts, compiler, targets
+
+program = compiler.prepare(builder, settings=ModelSettings(integrator="rk4", dt=dt))
+model = runtime.bind(compiler.compile(program, target=targets.casadi))
 ```
 
 开启后 effects 中多出七个地面诊断路径，滑跑时可以用 `Root::ground_normal_forces` 看轮载分布，用 `Root::ground_contact_count` 看接触点数量。起飞滑跑的初值取静止、接地的状态，接地场景取 1 m 高度、70 m/s 水平速度与 1.5 m/s 下降率：
 
 <<< @/../models/fr_gtm/examples/ground_operations.py#02-state-input-1
 
-`just example-ground --scenario takeoff` 与 `just example-ground --scenario touchdown` 分别跑这两个场景，脚本的 `--backend` 支持 `numpy`、`casadi`、`jax` 与 `native` 四种取值，其中 native 走「先编译 CasADi 再 `convert`」的路径：
+`just example-ground --scenario takeoff` 与 `just example-ground --scenario touchdown` 分别跑这两个场景，脚本的 `--backend` 支持 `numpy`、`casadi`、`jax` 与 `native` 四种取值，其中 native 走「从同一份 `ModelProgram` 编译 native 目标」的路径：
 
 <<< @/../models/fr_gtm/examples/ground_operations.py#04-scenarios-1
 
@@ -68,7 +71,7 @@ model = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=dt)).compile(
 | 紊流门控 | `turbulence_level <= 1e-3` 时阵风被门控为零，看起来「风没起作用」属于预期行为 |
 | 不确定度是相对量 | 0.05 表示 5%，不是绝对质量或惯量 |
 | 噪声按标准差缩放 | `Root::n` 是标准化样本，物理噪声由配置的标准差决定 |
-| native 后端首次运行慢 | 首次会编译并缓存 C++ 扩展，之后复用缓存 |
+| native 后端首次运行慢 | 首次会编译 C++ 扩展；需要跨运行复用时显式设置 `OperationContext(store=...)` |
 
 ## 相关页面
 

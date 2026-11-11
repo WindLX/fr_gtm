@@ -1,6 +1,6 @@
 """由标准风 Block 组合而成的 GTM 风子系统。"""
 
-import fly_ruler_core as fr
+from fly_ruler_core import api as fr
 from fly_ruler_std.blocks.wind import (
     DrydenConfig,
     DrydenTurbulence,

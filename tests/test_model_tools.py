@@ -3,9 +3,12 @@
 from typing import assert_type
 from urllib.request import urlopen
 
-import fly_ruler_core as fr
 import numpy as np
 import pytest
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core import api as fr
+from fly_ruler_core.runtime.backend import NumpyArray
+from fly_ruler_core.runtime.instance import RuntimeInstance
 from fly_ruler_std.runtime import graph as fr_graph
 
 from fr_gtm import (
@@ -26,16 +29,19 @@ from fr_gtm import (
 
 
 @pytest.fixture(scope="module")
-def nominal() -> tuple[GTMConfig, fr.CompiledModel[fr.NumpyArray]]:
+def nominal() -> tuple[GTMConfig, RuntimeInstance[NumpyArray]]:
     cfg = GTMConfig.fullscale()
-    model = fr.Compiler(fr.CompilerSpec(cache_policy="off")).compile(
-        GTMSystem.build("Root", cfg), target=fr.targets.numpy
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(GTMSystem.build("Root", cfg), settings=ModelSettings()),
+            target=targets.numpy,
+        )
     )
     return cfg, model
 
 
 def test_layout_paths_and_channel_dimensions(
-    nominal: tuple[GTMConfig, fr.CompiledModel[fr.NumpyArray]],
+    nominal: tuple[GTMConfig, RuntimeInstance[NumpyArray]],
 ) -> None:
     _, model = nominal
     paths = GTMPaths()
@@ -62,11 +68,11 @@ def test_initial_airdata_wind_parameters_and_engine(
     cfg = GTMConfig.fullscale() if fullscale else GTMConfig.subscale()
     if second_order:
         cfg.engine = cfg.engine.model_copy(update={"lag": JetCatThrottleLagConfig()})
-    compiler = fr.Compiler(fr.CompilerSpec(cache_policy="off"))
+    compiler_settings = ModelSettings()
     builder = GTMSystem.build("Root", cfg)
     paths = GTMPaths()
 
-    def verify[T](model: fr.CompiledModel[T]) -> None:
+    def verify[T](model: RuntimeInstance[T]) -> None:
         x, xd, u, p = init(
             model,
             cfg,
@@ -111,9 +117,23 @@ def test_initial_airdata_wind_parameters_and_engine(
         assert model.n_x == (26 if second_order else 25)
 
     if backend == "numpy":
-        verify(compiler.compile(builder, target=fr.targets.numpy))
+        verify(
+            runtime.bind(
+                compiler.compile(
+                    compiler.prepare(builder, settings=compiler_settings),
+                    target=targets.numpy,
+                )
+            )
+        )
     else:
-        verify(compiler.compile(builder, target=fr.targets.casadi))
+        verify(
+            runtime.bind(
+                compiler.compile(
+                    compiler.prepare(builder, settings=compiler_settings),
+                    target=targets.casadi,
+                )
+            )
+        )
 
 
 def test_nested_instance_init_and_observation() -> None:
@@ -130,8 +150,11 @@ def test_nested_instance_init_and_observation() -> None:
         n >> plant.n
         fr.export(y=plant.y, clean_y=plant.clean_y)
 
-    model = fr.Compiler(fr.CompilerSpec(cache_policy="off")).compile(
-        Parent.build("Root"), target=fr.targets.numpy
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(Parent.build("Root"), settings=ModelSettings()),
+            target=targets.numpy,
+        )
     )
     paths = GTMPaths("Root.aircraft", io_root="Root")
     x, xd, u, p = init(
@@ -144,7 +167,7 @@ def test_nested_instance_init_and_observation() -> None:
 
 
 def test_measured_observation_and_validation(
-    nominal: tuple[GTMConfig, fr.CompiledModel[fr.NumpyArray]],
+    nominal: tuple[GTMConfig, RuntimeInstance[NumpyArray]],
 ) -> None:
     cfg, model = nominal
     x, xd, _, p = init(model, cfg)
@@ -182,7 +205,7 @@ def test_gaussian_contract_and_reproducibility() -> None:
 
 
 def test_inspect_graph_webui(
-    nominal: tuple[GTMConfig, fr.CompiledModel[fr.NumpyArray]],
+    nominal: tuple[GTMConfig, RuntimeInstance[NumpyArray]],
 ) -> None:
     """与 inspect 示例相同的入口能提供真实页面与模型拓扑。"""
     _, model = nominal

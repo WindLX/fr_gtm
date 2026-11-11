@@ -6,16 +6,21 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TypedDict
 
-import fly_ruler_core as fr
 import numpy as np
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core import api as fr
+from fly_ruler_core.model.description import VariableInfo
+from fly_ruler_core.model.program import TargetProgram
+from fly_ruler_core.runtime.backend import BuildValue, NumpyArray
+from fly_ruler_core.runtime.instance import RuntimeInstance
 from fly_ruler_std.libs.coordinates import aero_to_body_vel
 from fly_ruler_std.libs.rotation import Quaternion
 
 from .config import GTMConfig
 from .layout import D_DIM, N_DIM, ROOT_PATHS, U_DIM, Y_INDEX, GTMPaths
 
-type Vector = Sequence[float] | fr.NumpyArray
-type _Values = dict[str | fr.VariableInfo, fr.NumpyArray]
+type Vector = Sequence[float] | NumpyArray
+type _Values = dict[str | VariableInfo, NumpyArray]
 
 
 class Uncertainty(TypedDict, total=False):
@@ -38,14 +43,14 @@ class Uncertainty(TypedDict, total=False):
     c_r: Vector
 
 
-def _vector(values: Vector, size: int, name: str) -> fr.NumpyArray:
+def _vector(values: Vector, size: int, name: str) -> NumpyArray:
     array = np.asarray(values, dtype=np.float64)
     if array.shape != (size,) or not np.isfinite(array).all():
         raise ValueError(f"{name} must contain {size} finite values")
     return array
 
 
-def sample_disturbance(rng: np.random.Generator) -> fr.NumpyArray:
+def sample_disturbance(rng: np.random.Generator) -> NumpyArray:
     """生成四路均值 0、标准差 π 的 Dryden 激励，匹配 gtm_ad.create_disturbance。
 
     Args:
@@ -57,7 +62,7 @@ def sample_disturbance(rng: np.random.Generator) -> fr.NumpyArray:
     return rng.normal(0.0, np.pi, size=D_DIM)
 
 
-def sample_sensor_noise(rng: np.random.Generator) -> fr.NumpyArray:
+def sample_sensor_noise(rng: np.random.Generator) -> NumpyArray:
     """生成 17 路标准正态传感器噪声，通道标准差由 Sensor 内部施加。
 
     Args:
@@ -70,7 +75,7 @@ def sample_sensor_noise(rng: np.random.Generator) -> fr.NumpyArray:
 
 
 def build_input[T](
-    model: fr.CompiledModel[T],
+    model: RuntimeInstance[T],
     command: Vector | T,
     *,
     d: Vector | T | None = None,
@@ -149,7 +154,7 @@ class Initializer[T]:
 
     def __init__(
         self,
-        model: fr.CompiledModel[T],
+        model: RuntimeInstance[T],
         cfg: GTMConfig,
         *,
         paths: GTMPaths = ROOT_PATHS,
@@ -160,12 +165,25 @@ class Initializer[T]:
             model: 生产模型，输入输出保持其后端类型。
             cfg: 与生产模型一致的配置。
             paths: 生产实例路径目录。
+
+        Raises:
+            ValueError: 模型不是支持的 NumPy、CasADi 或 JAX 后端。
         """
         self._model, self._paths = model, paths
-        self._kernel = fr.Compiler(fr.CompilerSpec()).compile(
-            _InitialKinematics.build("Root", cfg),
-            target=fr.targets.PythonTarget(model.backend),
+        program = compiler.prepare(
+            _InitialKinematics.build("Root", cfg), settings=ModelSettings()
         )
+        generated: TargetProgram[object]
+        match model.backend.name:
+            case "numpy":
+                generated = compiler.compile(program, target=targets.numpy)
+            case "casadi":
+                generated = compiler.compile(program, target=targets.casadi)
+            case "jax":
+                generated = compiler.compile(program, target=targets.jax)
+            case _:
+                raise ValueError("Initializer requires a NumPy, CasADi or JAX model")
+        self._kernel = runtime.bind(generated, backend=model.backend)
         self._empty_x = self._kernel.x.build()
         self._empty_xd = self._kernel.xd.build()
         self._parameters = self._kernel.p.default()
@@ -174,13 +192,13 @@ class Initializer[T]:
     def __call__(
         self,
         *,
-        position: fr.BuildValue[T] = (0.0, 0.0, -1000.0),
-        airdata: fr.BuildValue[T] = (0.0, 0.0, 100.0),
-        euler: fr.BuildValue[T] = (0.0, 0.0, 0.0),
-        command: fr.BuildValue[T] = (0.0, 0.0, 0.0, 40.0),
-        wind: fr.BuildValue[T] = (0.0, 0.0, 0.0),
-        uncertainty: Mapping[str, fr.BuildValue[T]] | None = None,
-        rates: fr.BuildValue[T] = (0.0, 0.0, 0.0),
+        position: BuildValue[T] = (0.0, 0.0, -1000.0),
+        airdata: BuildValue[T] = (0.0, 0.0, 100.0),
+        euler: BuildValue[T] = (0.0, 0.0, 0.0),
+        command: BuildValue[T] = (0.0, 0.0, 0.0, 40.0),
+        wind: BuildValue[T] = (0.0, 0.0, 0.0),
+        uncertainty: Mapping[str, BuildValue[T]] | None = None,
+        rates: BuildValue[T] = (0.0, 0.0, 0.0),
     ) -> tuple[T, T, T, T]:
         """从原生数组或普通数值序列构造 x/xd/u/p。
 
@@ -201,7 +219,7 @@ class Initializer[T]:
             ValueError: 输入形状与模型声明不匹配。
         """
         model, paths, kernel = self._model, self._paths, self._kernel
-        inputs: dict[str | fr.VariableInfo, fr.BuildValue[T]] = {
+        inputs: dict[str | VariableInfo, BuildValue[T]] = {
             "Root::euler": euler,
             "Root::airdata": airdata,
             "Root::rates": rates,
@@ -213,7 +231,7 @@ class Initializer[T]:
             0.0, self._empty_x, self._empty_xd, kernel.u.build(inputs), self._parameters
         )
         k = kernel.y.read(output.y, by="path")
-        parameters: dict[str | fr.VariableInfo, fr.BuildValue[T]] = {
+        parameters: dict[str | VariableInfo, BuildValue[T]] = {
             paths.p.wind_speed: k["Root::wind_speed"],
             paths.p.wind_direction: k["Root::wind_direction"],
             paths.p.turbulence_level: k["Root::turbulence_level"],
@@ -232,7 +250,7 @@ class Initializer[T]:
         p = model.p.build(parameters)
         u = model.u.build({paths.u.command: command})
         xd = model.xd.build()
-        values: dict[str | fr.VariableInfo, fr.BuildValue[T]] = {
+        values: dict[str | VariableInfo, BuildValue[T]] = {
             paths.x.pos_ned: position,
             paths.x.vel_body: k["Root::vel_body"],
             paths.x.quat: k["Root::quat"],
@@ -261,7 +279,7 @@ class Initializer[T]:
 
 
 def init[T](
-    model: fr.CompiledModel[T],
+    model: RuntimeInstance[T],
     cfg: GTMConfig,
     *,
     position: Vector = (0.0, 0.0, -1000.0),
@@ -303,7 +321,7 @@ def init[T](
     abv = _vector(airdata, 3, "airdata")
     if abv[2] < 0.0:
         raise ValueError("VTAS must be nonnegative")
-    parameters: dict[str, fr.BuildValue[T]] = {}
+    parameters: dict[str, BuildValue[T]] = {}
     if uncertainty is not None:
         if "weight" in uncertainty:
             parameters["weight"] = _vector([uncertainty["weight"]], 1, "weight")
@@ -367,8 +385,8 @@ class Observation:
 
 
 def read_observation[T](
-    model: fr.CompiledModel[T],
-    packed_y: T | fr.NumpyArray,
+    model: RuntimeInstance[T],
+    packed_y: T | NumpyArray,
     *,
     measured: bool = False,
     paths: GTMPaths = ROOT_PATHS,

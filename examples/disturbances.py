@@ -14,8 +14,8 @@
 turbulence_level；不确定度参数是相对量，取 0 表示复现标称模型。
 """
 
-import fly_ruler_core as fr
 import numpy as np
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
 
 from fr_gtm import (
     GTMConfig,
@@ -34,8 +34,13 @@ def main() -> None:
     # 默认配置为全尺寸、NORMAL 构型且不实例化地面接触；示例只关注气动与风响应。
     cfg = GTMConfig.fullscale()
     builder = GTMSystem.build("Root", cfg)
-    model = fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
-        builder, target=fr.targets.casadi
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(
+                builder, settings=ModelSettings(integrator="euler", dt=0.01)
+            ),
+            target=targets.casadi,
+        )
     )
     # #region 04-scenarios-1
     # 来流、姿态和参数一次构造；Dryden 初态为零，激励从外部高斯噪声进入。

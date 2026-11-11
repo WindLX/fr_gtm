@@ -17,7 +17,7 @@ scalar-first；三个舵面位置为 [升降舵, 副翼, 方向舵]（度），�
 
 from pathlib import Path
 
-import fly_ruler_core as fr
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
 from fly_ruler_std.runtime.record import Recorder
 
 from fr_gtm import GTMConfig, GTMSystem, init, read_observation
@@ -30,8 +30,13 @@ def main() -> None:
     # 默认配置为全尺寸、NORMAL 构型且关闭地面接触；编译到 CasADi 后端。
     cfg = GTMConfig.fullscale()
     builder = GTMSystem.build("Root", cfg)
-    model = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=0.01)).compile(
-        builder, target=fr.targets.casadi
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(
+                builder, settings=ModelSettings(integrator="rk4", dt=0.01)
+            ),
+            target=targets.casadi,
+        )
     )
     # #endregion 01-build-1
     # #region 02-state-input-1

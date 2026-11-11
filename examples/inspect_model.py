@@ -1,6 +1,6 @@
-"""导出 GTM 拓扑、生成源码与向量布局。
+"""导出 GTM 可恢复产物与向量布局。
 
-主题：编译一次 CasADi 模型，打印编译产物目录、系统 IR、后端源码与布局文件的路径，
+主题：编译一次 CasADi 目标，保存完整产物并通过 reader 打印模型描述，
 再给出各向量空间的大小与完整路径清单，便于对照文档检查模型接口。
 
 运行：
@@ -8,17 +8,24 @@
     cd models/fr_gtm && just example-inspect
 
 预期结果：打印布局与产物信息，并启动 Graph WebUI；Ctrl+C 退出。
-使用 --no-graph 只打印 artifact、topology、source、layout、cache 与六个尺寸，按 x、u、y
-分别列出完整路径。cache 首次多为 miss，产物已存在时为 hit。
+使用 --no-graph 只打印 artifact、description 与六个尺寸，按 x、u、y
+分别列出完整路径。
 
-说明：本示例只读编译产物、不推进仿真；默认全尺寸 NORMAL 构型下 n_x=25、n_xdot=24、
+说明：本示例生成并检查产物，不推进仿真；默认全尺寸 NORMAL 构型下 n_x=25、n_xdot=24、
 n_xd=0、n_u=25、n_p=33、n_y=34，其中 xdot 比 x 少一维是因为四元数按 SO3 切空间求导。
 """
 
 import argparse
 from pathlib import Path
 
-import fly_ruler_core as fr
+from fly_ruler_core import (
+    ModelSettings,
+    OperationContext,
+    artifacts,
+    compiler,
+    runtime,
+    targets,
+)
 from fly_ruler_std.runtime import graph as fr_graph
 
 from fr_gtm import GTMConfig, GTMSystem
@@ -29,22 +36,16 @@ def main(*, graph: bool = True, port: int = 18001) -> None:
     # builder 只描述系统连接关系，编译阶段才把它降为后端代码与布局。
     root = Path(__file__).resolve().parent.parent
     builder = GTMSystem.build("Root", GTMConfig.fullscale())
-    # artifact_dir 指定产物落盘位置；compile 返回的模型携带产物元数据。
-    model = fr.Compiler(
-        fr.CompilerSpec(
-            integrator="rk4",
-            dt=0.01,
-            artifact_dir=root / "build" / "flyruler",
-        )
-    ).compile(builder, target=fr.targets.casadi)
-    assert model.artifact is not None
-
-    # artifact.path 是产物根目录，file() 按类别取具体文件；cache_hit 说明是否复用缓存。
-    print(f"artifact: {model.artifact.path}")
-    print(f"topology: {model.artifact.file(fr.ArtifactFile.SYSTEM_IR)}")
-    print(f"source:   {model.artifact.file(fr.ArtifactFile.BACKEND_SOURCE)}")
-    print(f"layout:   {model.artifact.file(fr.ArtifactFile.LAYOUT)}")
-    print(f"cache:    {'hit' if model.artifact.cache_hit else 'miss'}")
+    # Store 是显式可复用缓存；保存目录是可独立恢复的交付产物。
+    context = OperationContext(store=root / "build" / "store")
+    program = compiler.prepare(
+        builder, settings=ModelSettings(integrator="rk4", dt=0.01), context=context
+    )
+    target = compiler.compile(program, target=targets.casadi, context=context)
+    saved = artifacts.save(target, output_dir=root / "build" / "model", overwrite=True)
+    model = runtime.bind(target)
+    print(f"artifact: {saved}")
+    print(f"description: {artifacts.open(saved).describe()}")
     print(
         f"sizes: x={model.n_x}, xdot={model.n_xdot}, "
         f"xd={model.n_xd}, u={model.n_u}, p={model.n_p}, y={model.n_y}"

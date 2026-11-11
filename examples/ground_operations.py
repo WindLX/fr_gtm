@@ -21,9 +21,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated
 
-import fly_ruler_core as fr
 import numpy as np
 import typer
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core.runtime.instance import RuntimeInstance
+from fly_ruler_core.runtime.jax_config import JaxRuntimePolicy, configure_jax_runtime
 from fly_ruler_std.blocks.physics import solve_static_ground_pose
 from fly_ruler_std.runtime.record import Recorder
 
@@ -31,7 +33,7 @@ from fr_gtm import GTMConfig, GTMPaths, GTMSystem, build_input, init, read_obser
 
 
 def _run[T](
-    model: fr.CompiledModel[T],
+    model: RuntimeInstance[T],
     cfg: GTMConfig,
     scenario: str,
     duration: float,
@@ -129,8 +131,13 @@ def main(
     # 按后端分别编译同一条 IR；每个分支保留自己的精确模型类型。
     if backend == "numpy":
         _run(
-            fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=dt)).compile(
-                builder, target=fr.targets.numpy
+            runtime.bind(
+                compiler.compile(
+                    compiler.prepare(
+                        builder, settings=ModelSettings(integrator="rk4", dt=dt)
+                    ),
+                    target=targets.numpy,
+                )
             ),
             cfg,
             scenario,
@@ -140,8 +147,13 @@ def main(
         )
     elif backend == "casadi":
         _run(
-            fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=dt)).compile(
-                builder, target=fr.targets.casadi
+            runtime.bind(
+                compiler.compile(
+                    compiler.prepare(
+                        builder, settings=ModelSettings(integrator="rk4", dt=dt)
+                    ),
+                    target=targets.casadi,
+                )
             ),
             cfg,
             scenario,
@@ -150,16 +162,21 @@ def main(
             output_dir,
         )
     elif backend == "jax":
-        fr.configure_jax_runtime(
-            fr.JaxRuntimePolicy(
+        configure_jax_runtime(
+            JaxRuntimePolicy(
                 platforms=("cpu",),
                 preallocate=False,
                 enable_x64=True,
             )
         )
         _run(
-            fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=dt)).compile(
-                builder, target=fr.targets.jax
+            runtime.bind(
+                compiler.compile(
+                    compiler.prepare(
+                        builder, settings=ModelSettings(integrator="rk4", dt=dt)
+                    ),
+                    target=targets.jax,
+                )
             ),
             cfg,
             scenario,
@@ -170,10 +187,10 @@ def main(
     # #region 04-scenarios-1
     # native 不能直接编译，需要先生成 CasADi 符号模型，再转换成本地目标。
     elif backend == "native":
-        compiler = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=dt))
-        symbolic = compiler.compile(builder, target=fr.targets.casadi)
+        compiler_settings = ModelSettings(integrator="rk4", dt=dt)
+        program = compiler.prepare(builder, settings=compiler_settings)
         _run(
-            compiler.convert(symbolic, target=fr.targets.NativeTarget()),
+            runtime.bind(compiler.compile(program, target=targets.NativeTarget())),
             cfg,
             scenario,
             duration,

@@ -5,7 +5,7 @@
 高度 m、TAS m/s、gamma/psi/phi deg；生产模型仍只导出两个 17 维物理观测。
 """
 
-import fly_ruler_core as fr
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
 from fly_ruler_std.runtime.linearize import LinearizationSolver, LinearizationSpec
 
 from fr_gtm import GTMConfig, GTMPaths, GTMSystem, read_observation, trim
@@ -15,8 +15,14 @@ def main() -> None:
     """真正求解刚体与内部动态平衡，不再固定刚体工作点只配平滞后。"""
     cfg = GTMConfig.fullscale()
     paths = GTMPaths()
-    model = fr.Compiler(fr.CompilerSpec(integrator="rk4", dt=0.01)).compile(
-        GTMSystem.build("Root", cfg), target=fr.targets.casadi
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(
+                GTMSystem.build("Root", cfg),
+                settings=ModelSettings(integrator="rk4", dt=0.01),
+            ),
+            target=targets.casadi,
+        )
     )
     # #region 05-analysis-1
     point = trim(model, cfg, altitude=1000.0, tas=100.0, gamma=0.0, psi=0.0, phi=0.0)

@@ -20,11 +20,11 @@ GTM 的回归分三层：结构回归看路径与维度，数值回归看与外�
 
 ## 独立仓 CI
 
-`.github/workflows/ci.yml` 只检出 `fr_gtm`，在 Ubuntu / Python 3.12 上分开执行 `just check`、逐文件回归及离线示例、wheel/sdist 构建与安装验收。NumPy、CasADi、native、CPU JAX 和 CPU PyTorch 使用真实后端，不需要主仓环境、外部 `gtm_ad` 或硬件设备。
+`.github/workflows/ci.yml` 只检出 `fr_gtm`，在 Ubuntu / Python 3.12 上分开执行 `just check`、逐文件回归及离线示例、wheel/sdist 构建与安装验收。NumPy、CasADi、native 和 CPU JAX 使用真实后端，不需要主仓环境、外部 `gtm_ad` 或硬件设备。
 
 依赖声明使用 `fly-ruler>=0.1.7`；CI 的 `--upgrade-package fly-ruler` 每次从 PyPI 解析最新稳定版，不使用锁文件中的 SDK 固定结果。其余依赖优先复用锁文件，后续命令通过 `UV_NO_SYNC=1` 使用同一环境。打包验收分别将 wheel 和 sdist 安装到新的虚拟环境，用 `python -I scripts/check_install.py` 检查导入来源、公开 SDK 来源、两尺度四构型资源和十步仿真；脚本必须由该验收环境的 Python 执行，而非开发环境。
 
-工作流只上传构建产物，不发布 PyPI。CUDA 项在无 GPU runner 上按测试条件跳过；真实设备与网络服务仍使用单独的联调流程。
+工作流只上传构建产物，不发布 PyPI。真实设备与网络服务仍使用单独的联调流程。
 
 ## 冻结参考
 

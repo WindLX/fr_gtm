@@ -60,8 +60,6 @@ jobs:
           just-version: "1.59.0"
       - name: Install public dependencies and upgrade the SDK
         run: uv sync --extra jax --extra stick --extra proto --upgrade-package fly-ruler
-      - name: Install CPU PyTorch for optional backend regressions
-        run: uv pip install --python .venv/bin/python torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
       # just test 每个文件独立启动进程，释放大型编译图；不启动真实设备或遥测服务。
       - run: just test
       - run: just test-examples test-examples-stick

@@ -7,9 +7,9 @@ from importlib import resources
 from pathlib import Path
 from typing import Literal, NamedTuple
 
-import fly_ruler_core as fr
 import numpy as np
-from fly_ruler_core import Signal
+from fly_ruler_core import api as fr
+from fly_ruler_core.api.types import Signal
 from fly_ruler_std.libs.atmosphere import atmos76
 from fly_ruler_std.libs.coordinates import body_vel_to_aero_regularized
 from pydantic import BaseModel, ConfigDict, Field

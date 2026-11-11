@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import fly_ruler_core as fr
 import numpy as np
 import pytest
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
 
 from fr_gtm import (
     GTMConfig,
@@ -31,9 +31,13 @@ def test_native_initializer_jit_vmap_and_differentiation(second_order: bool) -> 
     cfg = GTMConfig.fullscale()
     if second_order:
         cfg.engine = cfg.engine.model_copy(update={"lag": JetCatThrottleLagConfig()})
-    compiler = fr.Compiler(fr.CompilerSpec())
+    compiler_settings = ModelSettings()
     builder = GTMSystem.build("Root", cfg)
-    model = compiler.compile(builder, target=fr.targets.jax)
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(builder, settings=compiler_settings), target=targets.jax
+        )
+    )
     initializer = Initializer(model, cfg)
     data = jnp.array([5.0, 1.0, 100.0])
     wind = jnp.array([8.0, 35.0, 2.0])
@@ -50,7 +54,11 @@ def test_native_initializer_jit_vmap_and_differentiation(second_order: bool) -> 
 
     result = jax.jit(construct)(data)
     assert all(isinstance(value, jax.Array) for value in result)
-    reference = compiler.compile(builder, target=fr.targets.numpy)
+    reference = runtime.bind(
+        compiler.compile(
+            compiler.prepare(builder, settings=compiler_settings), target=targets.numpy
+        )
+    )
     expected = init(
         reference,
         cfg,

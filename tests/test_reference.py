@@ -4,9 +4,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-import fly_ruler_core as fr
 import numpy as np
 import pytest
+from fly_ruler_core import ModelSettings, compiler, runtime, targets
+from fly_ruler_core.api.types import PyIrBuilder
+from fly_ruler_core.runtime.instance import RuntimeInstance
 
 from fr_gtm import GTMConfig, GTMSystem, JetCatThrottleLagConfig, Mode
 
@@ -18,20 +20,25 @@ LAG = JetCatThrottleLagConfig()
 
 
 @lru_cache(maxsize=None)
-def _model(fullscale: bool, mode: str) -> fr.CompiledModel[Any]:
+def _model(fullscale: bool, mode: str) -> RuntimeInstance[Any]:
     cfg = (GTMConfig.fullscale if fullscale else GTMConfig.subscale)(mode=Mode(mode))
     cfg.engine = cfg.engine.model_copy(update={"lag": LAG})
     # gtm_ad/core/noise/sensor.py 把 throttle_act 的 noise_std 固定为 0。
     # 冻结参考采用该标定；当前 GTM 默认油门噪声在独立测试中验证，不改冻结数据。
     cfg.sensor.throttle.noise_std = 0.0
     builder = GTMSystem.build("Root", cfg)
-    assert isinstance(builder, fr.PyIrBuilder)
-    return fr.Compiler(fr.CompilerSpec(integrator="euler", dt=0.01)).compile(
-        builder, target=fr.targets.numpy
+    assert isinstance(builder, PyIrBuilder)
+    return runtime.bind(
+        compiler.compile(
+            compiler.prepare(
+                builder, settings=ModelSettings(integrator="euler", dt=0.01)
+            ),
+            target=targets.numpy,
+        )
     )
 
 
-def _state(model: fr.CompiledModel[Any], x: np.ndarray) -> np.ndarray:
+def _state(model: RuntimeInstance[Any], x: np.ndarray) -> np.ndarray:
     return np.asarray(
         model.x.build(
             {
@@ -55,7 +62,7 @@ def _state(model: fr.CompiledModel[Any], x: np.ndarray) -> np.ndarray:
     )
 
 
-def _parameters(model: fr.CompiledModel[Any], p: np.ndarray) -> np.ndarray:
+def _parameters(model: RuntimeInstance[Any], p: np.ndarray) -> np.ndarray:
     return np.asarray(
         model.p.build(
             {
@@ -196,8 +203,11 @@ def test_current_throttle_noise_calibration() -> None:
 
     cfg = GTMConfig.fullscale()
     assert cfg.sensor.throttle.noise_std == 1.0
-    model = fr.Compiler(fr.CompilerSpec()).compile(
-        GTMSystem.build("Root", cfg), target=fr.targets.numpy
+    model = runtime.bind(
+        compiler.compile(
+            compiler.prepare(GTMSystem.build("Root", cfg), settings=ModelSettings()),
+            target=targets.numpy,
+        )
     )
     x, xd, _, p = init(model, cfg, command=(0, 0, 0, 52))
     noise = np.zeros(17)

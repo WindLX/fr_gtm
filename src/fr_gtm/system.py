@@ -6,7 +6,7 @@ GTM 特有的表格与符号约定留在各自的 Block 内，标准库负责作
 
 from __future__ import annotations
 
-import fly_ruler_core as fr
+from fly_ruler_core import api as fr
 from fly_ruler_std.blocks.actuator import SimpleActuator, SimpleActuatorConfig
 from fly_ruler_std.blocks.physics import (
     GroundContact,
