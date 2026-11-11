@@ -32,7 +32,7 @@ CPU JAX 使用 `uv sync --extra jax`；CUDA 后端使用 `jax-cuda12` 或 `jax-c
 - **回归**：`just test` 逐文件独立进程运行，覆盖冻结参考、NumPy/CasADi/JAX/native；随后运行离线示例和手柄 dry-run。CUDA、真实手柄和 Proto 服务联调不在这个 CPU 作业范围内。
 - **打包**：构建 wheel/sdist，检查元数据；两种文件分别装进干净环境，从已安装包加载两尺度、四构型气动资源并运行十步仿真。产物保留为 Actions artifact，不自动发布。
 
-CI 用 `uv sync --extra jax --extra stick --extra proto --upgrade-package fly-ruler` 主动解析 PyPI 的最新稳定 SDK；`>=0.1.7` 是当前依赖声明，不是版本锁定。新编译入口的最低发行版本须在配套 core 发布时确定；开发候选只在隔离环境验证。`UV_NO_SYNC=1` 让后续 just 命令复用本作业已解析的环境。安装验收也独立从 PyPI 解析 SDK，不引用父仓目录。
+CI 用 `uv sync --extra jax --extra stick --extra proto --upgrade-package fly-ruler` 主动解析 PyPI 的最新稳定 SDK；`>=0.1.7` 是当前依赖声明，不是版本锁定。新编译入口面向 fly-ruler 0.2.0；待其正式发布后更新最低依赖与锁文件，开发候选只在隔离环境验证。`UV_NO_SYNC=1` 让后续 just 命令复用本作业已解析的环境。安装验收也独立从 PyPI 解析 SDK，不引用父仓目录。
 
 本地复现同样的 SDK 升级与静态检查：
 
