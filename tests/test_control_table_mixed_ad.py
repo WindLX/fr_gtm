@@ -6,13 +6,14 @@ import casadi as ca
 import numpy as np
 from fly_ruler_core import ModelSettings, compiler, runtime, targets
 from fly_ruler_core import api as fr
-from fly_ruler_core.api.types import PyIrBuilder, Signal
+from fly_ruler_core.api.types import Signal
+from fly_ruler_core.model.declaration import ModelDeclaration
 from fly_ruler_core.runtime.backend import NumpyArray
 
 from fr_gtm import GTMConfig
 
 
-def _definition(grids: list[NumpyArray], values: NumpyArray) -> PyIrBuilder:
+def _definition(grids: list[NumpyArray], values: NumpyArray) -> ModelDeclaration:
     @fr.block
     def Loads() -> None:
         aero = fr.input("aero", len(grids) - 1)

@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from fly_ruler_core import ModelSettings, compiler, runtime, targets
 from fly_ruler_core import api as fr
-from fly_ruler_core.api.types import PyIrBuilder
+from fly_ruler_core.model.declaration import ModelDeclaration
 from fly_ruler_core.model.program import ModelProgram
 from fly_ruler_core.runtime.backend import NumpyArray
 from fly_ruler_core.runtime.instance import RuntimeInstance
@@ -86,7 +86,7 @@ def cubic_case() -> tuple[GTMConfig, ModelProgram, NumpyArray]:
     cfg = GTMConfig.fullscale()
     cfg.aero.interpolation_method = "cubic"
     builder = GTMSystem.build("Root", cfg)
-    assert isinstance(builder, PyIrBuilder)
+    assert isinstance(builder, ModelDeclaration)
     program = compiler.prepare(
         builder, settings=ModelSettings(integrator="rk4", dt=0.01)
     )

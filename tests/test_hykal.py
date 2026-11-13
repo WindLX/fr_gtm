@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from fly_ruler_core import ModelSettings, compiler, runtime, targets
 from fly_ruler_core import api as fr
-from fly_ruler_core.api.types import PyIrBuilder
+from fly_ruler_core.model.declaration import ModelDeclaration
 from fly_ruler_core.runtime.instance import RuntimeInstance
 
 from fr_gtm.components.aero import _hykal
@@ -48,7 +48,7 @@ def _nasa_hykal(query: np.ndarray, trig: np.ndarray) -> np.ndarray:
     )
 
 
-def _builder() -> PyIrBuilder:
+def _builder() -> ModelDeclaration:
     @fr.system
     def Rates() -> None:
         @fr.block

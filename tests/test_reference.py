@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import pytest
 from fly_ruler_core import ModelSettings, compiler, runtime, targets
-from fly_ruler_core.api.types import PyIrBuilder
+from fly_ruler_core.model.declaration import ModelDeclaration
 from fly_ruler_core.runtime.instance import RuntimeInstance
 
 from fr_gtm import GTMConfig, GTMSystem, JetCatThrottleLagConfig, Mode
@@ -27,7 +27,7 @@ def _model(fullscale: bool, mode: str) -> RuntimeInstance[Any]:
     # 冻结参考采用该标定；当前 GTM 默认油门噪声在独立测试中验证，不改冻结数据。
     cfg.sensor.throttle.noise_std = 0.0
     builder = GTMSystem.build("Root", cfg)
-    assert isinstance(builder, PyIrBuilder)
+    assert isinstance(builder, ModelDeclaration)
     return runtime.bind(
         compiler.compile(
             compiler.prepare(

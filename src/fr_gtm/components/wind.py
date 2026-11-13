@@ -172,10 +172,8 @@ def Wind(cfg: WindConfig) -> None:
         uvw=steady.steady_wind + gust,
         omega=omega,
     )
-    fr.effects(
-        steady=steady.steady_wind,
-        gust=gust,
-    )
+    fr.effect("steady", steady.steady_wind)
+    fr.effect("gust", gust)
 
 
 __all__ = ["WindConfig", "WindParams", "Wind"]

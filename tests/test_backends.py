@@ -6,7 +6,7 @@ import casadi as ca
 import numpy as np
 import pytest
 from fly_ruler_core import ModelSettings, compiler, runtime, targets
-from fly_ruler_core.api.types import PyIrBuilder
+from fly_ruler_core.model.declaration import ModelDeclaration
 from fly_ruler_core.model.program import ModelProgram
 from ground_helpers import ground_state
 
@@ -22,9 +22,9 @@ TRAJECTORY_BACKENDS = ("numpy", "casadi", "native", "jax")
 LAG = GTMConfig.fullscale().engine.lag
 
 
-def _builder(*, enable_ground: bool = False) -> PyIrBuilder:
+def _builder(*, enable_ground: bool = False) -> ModelDeclaration:
     builder = GTMSystem.build("Root", GTMConfig.fullscale(enable_ground=enable_ground))
-    if not isinstance(builder, PyIrBuilder):
+    if not isinstance(builder, ModelDeclaration):
         raise TypeError("expected top-level GTM builder")
     return builder
 

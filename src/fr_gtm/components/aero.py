@@ -804,10 +804,8 @@ def Aero(cfg: AeroConfig) -> None:
     )
 
     # 系数和雷诺数属于诊断数据，不作为组件控制/接线输出；从 model.effects 按块路径读取。
-    fr.effects(
-        coefficients=aero.coefficients,
-        reynolds=aero.reynolds,
-    )
+    fr.effect("coefficients", aero.coefficients)
+    fr.effect("reynolds", aero.reynolds)
 
 
 __all__ = ["AeroConfig", "AeroResult", "aerodynamic_loads", "Aero"]

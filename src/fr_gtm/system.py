@@ -167,36 +167,32 @@ def GTMSystem(cfg: GTMConfig = _DEFAULT_CONFIG) -> None:
     # 作动器实际位置、气流角/空速/动压、发动机有效油门、姿态欧拉角/航迹角
     # 已在观测中；刚体位置/机体速度/四元数/角速率直接从 x 读取，不重复保存。
     # Aero 系数/雷诺数、Wind 稳态风/阵风已有各自 effects，不在根再声明。
-    fr.effects(
-        # 当前运行时质量特性，包含参数扰动。
-        weight=mass.weight,
-        mass=mass.mass,
-        inertia=mass.inertia,
-        inertia_inv=mass.inertia_inv,
-        # 观测未单列的大气/空速输出。
-        VE=aero.VEAS,
-        mach=aero.mach,
-        pressure_ratio=aero.pressure_ratio,
-        # 刚体状态之外的坐标变换、航向和导数输出。
-        DCM=eom.DCM,
-        vel_ned=eom.velocity_ned,
-        chi=eom.chi,
-        acceleration_body=eom.acceleration_body,
-        angular_acceleration_body=eom.angular_acceleration_body,
-        # 尚未由其他 effects 提供的角阵风和分项载荷。
-        wind_omega=wind.omega,
-        force_aero=aero.force,
-        force_engine=engine.force,
-        moment_aero=aero.moment,
-        moment_engine=engine.moment,
-    )
+    # 当前运行时质量特性，包含参数扰动。
+    fr.effect("weight", mass.weight)
+    fr.effect("mass", mass.mass)
+    fr.effect("inertia", mass.inertia)
+    fr.effect("inertia_inv", mass.inertia_inv)
+    # 观测未单列的大气/空速输出。
+    fr.effect("VE", aero.VEAS)
+    fr.effect("mach", aero.mach)
+    fr.effect("pressure_ratio", aero.pressure_ratio)
+    # 刚体状态之外的坐标变换、航向和导数输出。
+    fr.effect("DCM", eom.DCM)
+    fr.effect("vel_ned", eom.velocity_ned)
+    fr.effect("chi", eom.chi)
+    fr.effect("acceleration_body", eom.acceleration_body)
+    fr.effect("angular_acceleration_body", eom.angular_acceleration_body)
+    # 尚未由其他effects提供的角阵风和分项载荷。
+    fr.effect("wind_omega", wind.omega)
+    fr.effect("force_aero", aero.force)
+    fr.effect("force_engine", engine.force)
+    fr.effect("moment_aero", aero.moment)
+    fr.effect("moment_engine", engine.moment)
     if cfg.ground.enabled:
-        fr.effects(
-            ground_force_body=ground_force_body,
-            ground_moment_body=ground_moment_body,
-            ground_penetrations=ground.penetrations,
-            ground_normal_forces=ground.normal_forces,
-            ground_longitudinal_forces=ground.longitudinal_forces,
-            ground_lateral_forces=ground.lateral_forces,
-            ground_contact_count=ground.contact_count,
-        )
+        fr.effect("ground_force_body", ground_force_body)
+        fr.effect("ground_moment_body", ground_moment_body)
+        fr.effect("ground_penetrations", ground.penetrations)
+        fr.effect("ground_normal_forces", ground.normal_forces)
+        fr.effect("ground_longitudinal_forces", ground.longitudinal_forces)
+        fr.effect("ground_lateral_forces", ground.lateral_forces)
+        fr.effect("ground_contact_count", ground.contact_count)

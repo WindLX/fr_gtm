@@ -9,8 +9,8 @@ from typing import TypedDict
 import numpy as np
 from fly_ruler_core import ModelSettings, compiler, runtime, targets
 from fly_ruler_core import api as fr
+from fly_ruler_core.artifacts import TargetProgram
 from fly_ruler_core.model.description import VariableInfo
-from fly_ruler_core.model.program import TargetProgram
 from fly_ruler_core.runtime.backend import BuildValue, NumpyArray
 from fly_ruler_core.runtime.instance import RuntimeInstance
 from fly_ruler_std.libs.coordinates import aero_to_body_vel

@@ -33,6 +33,8 @@ std 两种刚体统一从 NED 速度计算航迹角/航向角。GTM 直接使用
 
 effects 逐项覆盖组件 out 中未被 x、y/clean_y 或已有子组件 effects 覆盖的诊断，包括质量/惯量、气动和发动机分项载荷、大气量、刚体坐标变换及加速度；状态别名和四元数导数参考项不导出。Aero 保留自己的系数/雷诺数，Wind 保留自己的稳态风/阵风，根不重复声明已有子组件诊断。可选地面诊断仍通过 effects 读取，地面开关不改变根输出布局。读取方法见[推进与记录](/guide/components/gtm/03-simulate)。
 
+诊断声明使用 `fr.effect(name, value, unit=..., description=...)`；每次声明一个有名字的量，不增加根输入或输出端口。构建交付 `ModelDeclaration`，`compiler.prepare` 固定模型数值语义并生成 `ModelProgram`，`compiler.compile` 生成 `TargetProgram`，最后由 `runtime.bind` 创建可执行模型。纯读目标从 `fly_ruler_core.artifacts` 导入 `TargetProgram`，无需重新创建编译器。
+
 ## 关键数据结构
 
 | 结构 | 位置 | 说明 |

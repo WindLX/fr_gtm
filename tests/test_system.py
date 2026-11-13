@@ -5,8 +5,7 @@ import numpy as np
 import pytest
 from fly_ruler_core import ModelSettings, compiler, runtime, targets
 from fly_ruler_core import api as fr
-from fly_ruler_core._core import PyCompiler
-from fly_ruler_core.api.types import PyIrBuilder
+from fly_ruler_core.model.declaration import ModelDeclaration
 from fly_ruler_core.model.description import VariableInfo
 from fly_ruler_core.runtime.instance import RuntimeInstance
 from ground_helpers import ground_state
@@ -23,7 +22,7 @@ from fr_gtm.components.mass import Mass
 
 def _compile(cfg: GTMConfig) -> RuntimeInstance[Any]:
     builder = GTMSystem.build("Root", cfg)
-    assert isinstance(builder, PyIrBuilder)
+    assert isinstance(builder, ModelDeclaration)
     return runtime.bind(
         compiler.compile(
             compiler.prepare(
@@ -47,8 +46,8 @@ def ground_model() -> RuntimeInstance[Any]:
 
 def test_topology_contains_semantic_physical_blocks() -> None:
     builder = GTMSystem.build("Root", GTMConfig.fullscale())
-    assert isinstance(builder, PyIrBuilder)
-    blocks = set(builder._artifact_schema(include_exprs=False)["blocks"])
+    assert isinstance(builder, ModelDeclaration)
+    blocks = set(builder.ir._artifact_schema(include_exprs=False)["blocks"])
     assert {
         "Root.actuator",
         "Root.aero",
@@ -56,7 +55,7 @@ def test_topology_contains_semantic_physical_blocks() -> None:
         "Root.mass",
         "Root.sensor",
     }.issubset(blocks)
-    schema = builder._artifact_schema(include_exprs=False)
+    schema = builder.ir._artifact_schema(include_exprs=False)
     engine = next(child for child in schema["subsystems"] if child["name"] == "engine")
     assert {"Root.engine.lag", "Root.engine.loads"}.issubset(engine["blocks"])
 
@@ -83,7 +82,7 @@ def test_clean_observation_has_no_instantaneous_command_dependency() -> None:
     builder = ControlledPlant.build("ControlledPlant")
     # 不再追加命令后，物理观测只由当前状态决定；编译器应明确拒绝无依赖的导数查询。
     with pytest.raises(ValueError, match="jacobian_no_dependency"):
-        PyCompiler.compile_from_builder(builder)
+        compiler.prepare(builder)
 
 
 def test_layout_and_full_paths(default_model: RuntimeInstance[Any]) -> None:
