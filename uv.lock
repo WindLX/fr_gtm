@@ -151,7 +151,7 @@ wheels = [
 
 [[package]]
 name = "fly-ruler"
-version = "0.3.1"
+version = "0.3.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "casadi" },
@@ -170,10 +170,10 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9a/d2/7676e0c69180e58556fd727490efefdcdf8966ac6a406de566ce21a0279d/fly_ruler-0.3.1.tar.gz", hash = "sha256:40538f45678b72bdcb27fcd49ade2a018e5427dbbcafeb33b5675da5936dbf45", size = 11477046, upload-time = "2026-11-16T07:35:22.824Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/87/4e/f3ecda0665db69985a58342ed0fbfb262d191a11af1117a3bff5527007cf/fly_ruler-0.3.2.tar.gz", hash = "sha256:9ce65993eff7949ea5dec13a94f264598b010a3b7db789e1c079ed8d9439d00e", size = 11549335, upload-time = "2026-11-16T17:10:09.367Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f6/66/3c7383c318ae7e01d62173bb53435b83f02ae258b354d116c135118435a8/fly_ruler-0.3.1-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:f2c25b2d76bfbc2eeb164a0854498fd4e1ceb11b8b4d7ee861509311d6ae215a", size = 14237516, upload-time = "2026-11-16T07:35:12.829Z" },
-    { url = "https://files.pythonhosted.org/packages/2f/f1/65e068370f4e66d1c6d1d067770cc4fd3dc2c7d1500623a98720113b5b63/fly_ruler-0.3.1-cp39-abi3-win_amd64.whl", hash = "sha256:2ac39fbbb637f1a7cce6e5432800c6da6a9d221dc23379462284f37394596f62", size = 13939959, upload-time = "2026-11-16T07:35:18.838Z" },
+    { url = "https://files.pythonhosted.org/packages/29/84/bbf911ebe1f618971f6ded2c110f3b0578201a0fcdb3ea94bcc0a0d9a9a4/fly_ruler-0.3.2-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:fcda6f979174480c586828b4b907283110fd51d9cd97fa79b87b8964c50e10df", size = 14718329, upload-time = "2026-11-16T17:08:52.36Z" },
+    { url = "https://files.pythonhosted.org/packages/09/8f/2eabc24b64444fb8c98cda2683c9f249d31a045bee61a481b48d79a7c2f0/fly_ruler-0.3.2-cp39-abi3-win_amd64.whl", hash = "sha256:bdd0cf97595cf4d6011aa232cac5b3c25b3656a4f6c1109ea65543f5f69229b4", size = 14029183, upload-time = "2026-11-16T17:09:37.731Z" },
 ]
 
 [package.optional-dependencies]
@@ -250,10 +250,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fly-ruler", specifier = ">=0.3.1" },
-    { name = "fly-ruler", extras = ["jax"], marker = "extra == 'jax'", specifier = ">=0.3.1" },
-    { name = "fly-ruler", extras = ["jax-cuda12"], marker = "extra == 'jax-cuda12'", specifier = ">=0.3.1" },
-    { name = "fly-ruler", extras = ["jax-cuda13"], marker = "extra == 'jax-cuda13'", specifier = ">=0.3.1" },
+    { name = "fly-ruler", specifier = ">=0.3.2" },
+    { name = "fly-ruler", extras = ["jax"], marker = "extra == 'jax'", specifier = ">=0.3.2" },
+    { name = "fly-ruler", extras = ["jax-cuda12"], marker = "extra == 'jax-cuda12'", specifier = ">=0.3.2" },
+    { name = "fly-ruler", extras = ["jax-cuda13"], marker = "extra == 'jax-cuda13'", specifier = ">=0.3.2" },
     { name = "fly-ruler-proto-python", marker = "extra == 'proto'", specifier = ">=0.4.0" },
     { name = "fly-stick", marker = "extra == 'stick'", specifier = ">=0.1.2" },
     { name = "fr-gtm", extras = ["jax", "stick", "proto"], marker = "extra == 'all'" },
