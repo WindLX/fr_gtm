@@ -4,10 +4,10 @@ import math
 from collections.abc import Callable
 
 import casadi as ca
+import fly_ruler_core as fr
 import numpy as np
 import pytest
 from fly_ruler_core import ModelSettings, compiler, runtime, targets
-from fly_ruler_core import api as fr
 from fly_ruler_core.model.declaration import ModelDeclaration
 from fly_ruler_core.runtime.instance import RuntimeInstance
 

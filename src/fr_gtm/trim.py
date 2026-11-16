@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import fly_ruler_core as fr
 import numpy as np
 from fly_ruler_core import ModelSettings, compiler, runtime, targets
-from fly_ruler_core import api as fr
 from fly_ruler_core.model.description import VariableInfo
 from fly_ruler_core.runtime.backend import NumpyArray
 from fly_ruler_core.runtime.instance import RuntimeInstance

@@ -3,10 +3,10 @@
 from typing import assert_type
 from urllib.request import urlopen
 
+import fly_ruler_core as fr
 import numpy as np
 import pytest
 from fly_ruler_core import ModelSettings, compiler, runtime, targets
-from fly_ruler_core import api as fr
 from fly_ruler_core.runtime.backend import NumpyArray
 from fly_ruler_core.runtime.instance import RuntimeInstance
 from fly_ruler_std.runtime import graph as fr_graph

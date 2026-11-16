@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import fly_ruler_core as fr
 import numpy as np
 import pytest
 from fly_ruler_core import ModelSettings, compiler, runtime, targets
-from fly_ruler_core import api as fr
 from numpy.typing import NDArray
 
 from fr_gtm import FirstOrderThrottleLagConfig, GTMConfig, JetCatThrottleLagConfig

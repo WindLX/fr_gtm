@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import partial
 
-from fly_ruler_core import api as fr
+import fly_ruler_core as fr
 from fly_ruler_std.libs.units import Length, Pressure, Speed
 from pydantic import BaseModel, ConfigDict, Field
 

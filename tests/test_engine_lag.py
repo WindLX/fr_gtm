@@ -21,10 +21,10 @@ import math
 from functools import lru_cache
 from typing import Any
 
+import fly_ruler_core as fr
 import numpy as np
 import pytest
 from fly_ruler_core import ModelSettings, compiler, runtime, targets
-from fly_ruler_core import api as fr
 
 from fr_gtm import GTMConfig, JetCatThrottleLagConfig
 from fr_gtm.components.engine import Engine

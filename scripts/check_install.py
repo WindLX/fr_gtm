@@ -4,10 +4,10 @@ import sys
 from importlib.metadata import distribution, version
 from pathlib import Path
 
+import fly_ruler_core as fr
 import fly_ruler_std
 import numpy as np
 from fly_ruler_core import ModelSettings, compiler, runtime, targets
-from fly_ruler_core import api as fr
 
 import fr_gtm
 

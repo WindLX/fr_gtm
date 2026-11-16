@@ -6,9 +6,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TypedDict
 
+import fly_ruler_core as fr
 import numpy as np
 from fly_ruler_core import ModelSettings, compiler, runtime, targets
-from fly_ruler_core import api as fr
 from fly_ruler_core.artifacts import TargetProgram
 from fly_ruler_core.model.description import VariableInfo
 from fly_ruler_core.runtime.backend import BuildValue, NumpyArray
